@@ -98,12 +98,22 @@ DEFAULT_IQR_MULTIPLIER: float = 1.5
 DEFAULT_MAX_NULL_THRESHOLD: float = 0.70  # Drop column if > 70% null
 DEFAULT_MAX_CARDINALITY: int = 50  # Flag high-cardinality categoricals
 DEFAULT_DUPLICATE_KEEP: str = "first"
+# Outlier handling guards — prevent winsorization from erasing real signal.
+# Columns with <= this many unique values are treated as discrete (binary flags,
+# encoded categoricals) and skipped — clipping them would destroy class structure.
+DEFAULT_MIN_UNIQUE_FOR_OUTLIER: int = 20
+# If more than this fraction of a column would be clipped, the "outliers" are the
+# distribution (e.g. a rare-event cluster / minority class), not noise — skip it.
+DEFAULT_MAX_OUTLIER_FRACTION: float = 0.05
 
 # Feature engineering
 DEFAULT_MAX_ONEHOT_CARDINALITY: int = 15
 DEFAULT_VARIANCE_THRESHOLD: float = 0.01
 DEFAULT_CORRELATION_THRESHOLD: float = 0.95
 DEFAULT_SELECT_K_BEST: int = 20
+# Categorical columns whose unique-value ratio exceeds this are ID-like (e.g. user_id,
+# transaction_id) and are dropped rather than label-encoded into pure noise.
+DEFAULT_ID_UNIQUENESS_RATIO: float = 0.5
 
 # Training
 DEFAULT_CV_FOLDS: int = 5

@@ -110,16 +110,24 @@ class FinalizationService:
             if len(X) > 500:
                 X = X.sample(500, random_state=42)
 
-            # Use appropriate explainer
+            # Use appropriate explainer. TreeExplainer/LinearExplainer are cheap;
+            # KernelExplainer is model-agnostic but O(n_explain * n_background) model
+            # calls, which can take minutes on non-tree models (e.g. SVC). Bound its
+            # work so finalization can never appear to hang.
+            X_explain = X
             try:
                 explainer = shap.TreeExplainer(model)
             except Exception:
                 try:
                     explainer = shap.LinearExplainer(model, X)
                 except Exception:
-                    explainer = shap.KernelExplainer(model.predict, X.iloc[:50])
+                    background = shap.kmeans(X, min(20, len(X)))
+                    explainer = shap.KernelExplainer(model.predict, background)
+                    # Explain a capped subset — mean |SHAP| is stable on a sample.
+                    X_explain = X.sample(min(100, len(X)), random_state=42)
 
-            shap_values = explainer.shap_values(X)
+            shap_values = explainer.shap_values(X_explain)
+            X = X_explain
 
             # Save mean absolute SHAP values
             if isinstance(shap_values, list):

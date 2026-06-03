@@ -29,18 +29,28 @@ class FeatureEngineeringService:
         self._config = config
 
     def encode_categoricals(self, df: pd.DataFrame, target: Optional[str] = None) -> tuple[pd.DataFrame, dict[str, str]]:
-        """One-hot or label encode categorical columns based on cardinality."""
+        """One-hot or label encode categorical columns based on cardinality.
+
+        ID-like columns (near-unique values, e.g. user_id) are dropped rather than
+        label-encoded: encoding them injects a high-cardinality noise feature that
+        models latch onto and overfit, while carrying no generalizable signal.
+        """
         encoding_map: dict[str, str] = {}
         cat_cols = df.select_dtypes(include=["object", "category", "str"]).columns.tolist()
         if target and target in cat_cols:
             cat_cols.remove(target)
 
+        n_rows = max(len(df), 1)
         for col in cat_cols:
             nunique = df[col].nunique()
             if nunique <= self._config.max_onehot_cardinality:
                 dummies = pd.get_dummies(df[col], prefix=col, drop_first=True, dtype=int)
                 df = pd.concat([df.drop(columns=[col]), dummies], axis=1)
                 encoding_map[col] = f"one_hot ({nunique} categories)"
+            elif nunique / n_rows > self._config.id_uniqueness_ratio:
+                df = df.drop(columns=[col])
+                encoding_map[col] = f"dropped (ID-like, {nunique} unique)"
+                logger.info(f"Dropped ID-like column '{col}' ({nunique} unique values)")
             else:
                 from sklearn.preprocessing import LabelEncoder
                 le = LabelEncoder()
@@ -107,17 +117,27 @@ class FeatureEngineeringService:
         return df, scaling_map
 
     def remove_low_variance(self, df: pd.DataFrame, target: Optional[str] = None) -> tuple[pd.DataFrame, list[str]]:
-        """Remove features with variance below threshold."""
+        """Remove near-constant features using a *scale-invariant* variance test.
+
+        Raw variance is meaningless across columns of different units (an income
+        column has variance in the millions, a 0-1 flag in the hundredths), so an
+        absolute threshold would keep high-magnitude noise and drop low-magnitude
+        signal. We min-max scale each column to [0, 1] first, making the threshold
+        comparable across columns; a truly constant column has scaled variance 0.
+        """
         from sklearn.feature_selection import VarianceThreshold
+        from sklearn.preprocessing import MinMaxScaler
+
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         if target and target in numeric_cols:
             numeric_cols.remove(target)
         if not numeric_cols:
             return df, []
 
-        selector = VarianceThreshold(threshold=self._config.variance_threshold)
         try:
-            selector.fit(df[numeric_cols])
+            scaled = MinMaxScaler().fit_transform(df[numeric_cols].fillna(0))
+            selector = VarianceThreshold(threshold=self._config.variance_threshold)
+            selector.fit(scaled)
             mask = selector.get_support()
             removed = [c for c, m in zip(numeric_cols, mask) if not m]
             if removed:
@@ -191,6 +211,17 @@ class FeatureEngineeringService:
         target = state.target_column
         problem_type = ProblemType(state.problem_type) if state.problem_type else ProblemType.UNKNOWN
 
+        # Act on leakage detected during data collection: a feature that is ~perfectly
+        # correlated with the target leaks the answer, inflating training metrics while
+        # the model fails to generalize. Detection without removal is a silent trap.
+        leakage_dropped: list[str] = []
+        if self._config.drop_leakage_columns:
+            leaked = state.data_quality_flags.get("potential_leakage") or []
+            leakage_dropped = [c for c in leaked if c in df.columns and c != target]
+            if leakage_dropped:
+                df = df.drop(columns=leakage_dropped)
+                logger.warning(f"Dropped {len(leakage_dropped)} leakage columns: {leakage_dropped}")
+
         # Encode target first
         if target:
             df = self.encode_target(df, target, problem_type)
@@ -220,7 +251,7 @@ class FeatureEngineeringService:
         featured_path = artifact_dir / "featured_data.csv"
         df.to_csv(featured_path, index=False)
 
-        all_removed = low_var_removed + corr_removed
+        all_removed = leakage_dropped + low_var_removed + corr_removed
         state.featured_data_path = str(featured_path)
         state.selected_features = [c for c in df.columns if c != target]
         state.feature_importances = importances

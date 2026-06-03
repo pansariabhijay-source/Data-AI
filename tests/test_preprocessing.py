@@ -52,10 +52,38 @@ def test_drop_high_null_columns(service):
 
 
 def test_handle_outliers_iqr(service):
-    df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 100]})
+    # Continuous column with a small fraction of genuine extreme outliers.
+    rng = np.random.RandomState(0)
+    vals = list(rng.normal(50, 5, 200)) + [5000.0, 6000.0]
+    df = pd.DataFrame({"a": vals})
     result, handled = service.handle_outliers(df)
     assert "a" in handled
-    assert result["a"].max() < 100
+    assert result["a"].max() < 5000
+
+
+def test_outliers_preserve_minority_signal(service):
+    # A binary-ish column where 16% of rows are the "1" cluster: those values are
+    # the minority class, NOT outliers, and must survive winsorization.
+    col = [0.0] * 168 + [1.0] * 32
+    df = pd.DataFrame({"flag": col})
+    result, handled = service.handle_outliers(df)
+    assert "flag" not in handled            # not clipped
+    assert result["flag"].max() == 1.0      # signal intact
+
+
+def test_outliers_skip_discrete(service):
+    # Low-cardinality integer column (encoded category) is treated as discrete.
+    df = pd.DataFrame({"cat_code": ([1, 2, 3, 4, 5] * 40) + [99]})
+    result, handled = service.handle_outliers(df)
+    assert "cat_code" not in handled
+
+
+def test_fix_dtypes_datetime(service):
+    dates = pd.date_range("2020-01-01", periods=50).astype(str).tolist()
+    df = pd.DataFrame({"signup": dates})
+    result, fixes = service.fix_dtypes(df)
+    assert pd.api.types.is_datetime64_any_dtype(result["signup"])
+    assert fixes.get("signup") == "converted to datetime"
 
 
 def test_fix_dtypes_numeric_string(service):

@@ -30,11 +30,36 @@ def test_encode_low_cardinality(service):
 
 
 def test_encode_high_cardinality(service):
+    # High cardinality but NOT id-like (10 categories spread over 100 rows) →
+    # label-encoded into a numeric feature.
     service._config.max_onehot_cardinality = 3
-    df = pd.DataFrame({"cat": [f"v{i}" for i in range(10)], "val": range(10)})
+    df = pd.DataFrame({"cat": [f"v{i % 10}" for i in range(100)], "val": range(100)})
     result, mapping = service.encode_categoricals(df)
     assert "cat" in result.columns
     assert pd.api.types.is_numeric_dtype(result["cat"])
+    assert "label_encoded" in mapping["cat"]
+
+
+def test_encode_drops_id_like(service):
+    # Near-unique column (id-like) is dropped, not encoded into noise.
+    service._config.max_onehot_cardinality = 3
+    df = pd.DataFrame({"user_id": [f"u{i}" for i in range(100)], "val": range(100)})
+    result, mapping = service.encode_categoricals(df)
+    assert "user_id" not in result.columns
+    assert "dropped" in mapping["user_id"]
+
+
+def test_low_variance_scale_invariant(service):
+    # A genuinely informative low-magnitude column (0/1 flag) must NOT be dropped
+    # just because its raw variance is small next to a large-magnitude column.
+    rng = np.random.RandomState(0)
+    df = pd.DataFrame({
+        "income": rng.normal(50000, 15000, 200),   # huge raw variance
+        "flag": rng.binomial(1, 0.4, 200),          # tiny raw variance, real signal
+    })
+    result, removed = service.remove_low_variance(df)
+    assert "flag" not in removed
+    assert "flag" in result.columns
 
 
 def test_remove_low_variance(service):

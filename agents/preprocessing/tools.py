@@ -94,9 +94,14 @@ class PreprocessingService:
                     fixes[col] = "converted to numeric"
                     continue
 
-                # Try datetime
+                # Try datetime. (Pandas >=2 removed ``infer_datetime_format`` — it
+                # now infers per-element by default, so passing it raises TypeError
+                # and silently leaves date columns as strings.)
                 try:
-                    dt = pd.to_datetime(df[col], errors="coerce", infer_datetime_format=True)
+                    import warnings as _warnings
+                    with _warnings.catch_warnings():
+                        _warnings.simplefilter("ignore")
+                        dt = pd.to_datetime(df[col], errors="coerce")
                     if dt.notna().mean() > 0.8:
                         df[col] = dt
                         fixes[col] = "converted to datetime"
@@ -114,8 +119,16 @@ class PreprocessingService:
         return df, fixes
 
     def handle_outliers(self, df: pd.DataFrame, target: Optional[str] = None) -> tuple[pd.DataFrame, dict[str, int]]:
-        """Winsorize outliers using IQR method on numeric columns."""
+        """Winsorize outliers using IQR method on *continuous* numeric columns.
+
+        Guards against erasing real signal: discrete/low-cardinality columns
+        (binary flags, encoded categoricals) are skipped, and a column is left
+        untouched if winsorizing would clip more than ``max_outlier_fraction`` of
+        its rows — at that point the "outliers" are the distribution itself
+        (e.g. a minority class or rare-event cluster), not noise.
+        """
         handled: dict[str, int] = {}
+        skipped: list[str] = []
         if self._config.outlier_method != "iqr":
             return df, handled
 
@@ -123,19 +136,39 @@ class PreprocessingService:
         if target and target in numeric_cols:
             numeric_cols.remove(target)
 
+        n_rows = len(df)
+        max_clip = self._config.max_outlier_fraction * n_rows if n_rows else 0
+
         for col in numeric_cols:
+            non_null = df[col].dropna()
+            # Skip discrete columns — clipping them destroys category structure.
+            if non_null.nunique() <= self._config.min_unique_for_outlier:
+                skipped.append(col)
+                continue
+
             q1 = df[col].quantile(0.25)
             q3 = df[col].quantile(0.75)
             iqr = q3 - q1
-            if iqr == 0:
+            if iqr <= 0:
+                skipped.append(col)
                 continue
+
             lower = q1 - self._config.iqr_multiplier * iqr
             upper = q3 + self._config.iqr_multiplier * iqr
             outlier_mask = (df[col] < lower) | (df[col] > upper)
             count = int(outlier_mask.sum())
-            if count > 0:
-                df[col] = df[col].clip(lower=lower, upper=upper)
-                handled[col] = count
+            if count == 0:
+                continue
+            # If "outliers" dominate, this is the real distribution — don't clip.
+            if count > max_clip:
+                skipped.append(col)
+                logger.info(
+                    f"Skipped outlier clipping for '{col}': {count}/{n_rows} "
+                    f"({count / n_rows:.1%}) flagged — treated as signal, not noise"
+                )
+                continue
+            df[col] = df[col].clip(lower=lower, upper=upper)
+            handled[col] = count
 
         if handled:
             total = sum(handled.values())

@@ -23,6 +23,7 @@ from core.constants import (
     DEFAULT_CORRELATION_THRESHOLD,
     DEFAULT_CV_FOLDS,
     DEFAULT_EARLY_STOPPING_ROUNDS,
+    DEFAULT_ID_UNIQUENESS_RATIO,
     DEFAULT_IQR_MULTIPLIER,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_MAX_BYTES,
@@ -31,9 +32,11 @@ from core.constants import (
     DEFAULT_MAX_FEATURE_COUNT,
     DEFAULT_MAX_NULL_THRESHOLD,
     DEFAULT_MAX_ONEHOT_CARDINALITY,
+    DEFAULT_MAX_OUTLIER_FRACTION,
     DEFAULT_MAX_RETRIES,
     DEFAULT_MIN_CLASSIFICATION_F1,
     DEFAULT_MIN_REGRESSION_R2,
+    DEFAULT_MIN_UNIQUE_FOR_OUTLIER,
     DEFAULT_N_JOBS,
     DEFAULT_OVERFITTING_THRESHOLD,
     DEFAULT_RANDOM_SEED,
@@ -94,6 +97,8 @@ class PreprocessingConfig(BaseModel):
     max_null_threshold: float = DEFAULT_MAX_NULL_THRESHOLD
     max_cardinality: int = DEFAULT_MAX_CARDINALITY
     duplicate_keep: str = "first"
+    min_unique_for_outlier: int = DEFAULT_MIN_UNIQUE_FOR_OUTLIER
+    max_outlier_fraction: float = DEFAULT_MAX_OUTLIER_FRACTION
 
     @field_validator("max_null_threshold")
     @classmethod
@@ -111,6 +116,8 @@ class FeatureEngineeringConfig(BaseModel):
     correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD
     select_k_best: int = DEFAULT_SELECT_K_BEST
     scaling_method: str = "standard"
+    id_uniqueness_ratio: float = DEFAULT_ID_UNIQUENESS_RATIO
+    drop_leakage_columns: bool = True
 
 
 class SplittingConfig(BaseModel):
