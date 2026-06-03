@@ -109,6 +109,27 @@ Axiom is built with strict security constraints suitable for enterprise deployme
 
 ---
 
+### 5. Future Development & Next Steps
+
+Axiom provides a robust foundation for autonomous machine learning, but it is designed with extensibility in mind. The following areas represent high-impact development opportunities for the future:
+
+#### 5.1 Deep Learning & Unstructured Data
+Currently, Axiom excels at tabular data (regression and classification). Future iterations can integrate **PyTorch** or **TensorFlow** backends to process unstructured data (images, text, and audio). Specialized agents could be introduced to build Convolutional Neural Networks (CNNs) or fine-tune Large Language Models (LLMs) autonomously.
+
+#### 5.2 Time-Series Forecasting
+Adding a dedicated **Time-Series Agent** would allow Axiom to handle temporal data. This agent would automatically generate lag features, rolling windows, and handle seasonality, utilizing models like ARIMA, Prophet, or LSTMs for forecasting tasks.
+
+#### 5.3 Real-Time Inference API (MLOps)
+While Axiom currently serializes the Champion Model to the `artifacts/` directory, the next step in the MLOps pipeline is deployment. We can expand the FastAPI backend to include an auto-generated `/predict` endpoint, allowing external applications to instantly query the trained models in real-time.
+
+#### 5.4 Cloud-Native Deployment & Scalability
+To support massive datasets and parallel model training, Axiom can be containerized using **Docker**. The architecture can be deployed on AWS, GCP, or Azure using **Kubernetes** to spin up scalable, ephemeral pods for computationally intensive agents (like the Model Training or Tuning agents).
+
+#### 5.5 Advanced Explainability (XAI) Expansion
+While SHAP provides excellent feature attribution, the platform can be enriched by adding **LIME** (Local Interpretable Model-agnostic Explanations) for individual prediction analysis, and **Partial Dependence Plots (PDP)** to visualize the marginal effect of features on the predicted outcome.
+
+---
+
 ### Conclusion
 
 Axiom represents a paradigm shift in machine learning. By combining the reasoning capabilities of Large Language Models with deterministic Python execution and a highly polished Next.js interface, Axiom allows organizations to rapidly prototype, train, and understand machine learning models at a fraction of the traditional time and cost.
