@@ -25,13 +25,45 @@ Built with a robust **FastAPI backend** and a modern **Next.js frontend**, Axiom
 ## 🏗 Architecture
 
 ```mermaid
-graph LR
-    CLI[CLI (main.py)] --> Core[Pipeline Orchestrator]
-    Web[Next.js Frontend] --> API[FastAPI Backend]
-    API --> Core
-    Core --> Agents[CrewAI Agents]
-    Agents --> ML[ML Tool Services]
-    ML --> Output[Artifacts & Reports]
+graph TD
+    subgraph Frontend ["Frontend"]
+        Web["Next.js Web UI"]
+        CLI["CLI (main.py)"]
+    end
+
+    subgraph Backend ["Backend"]
+        API["FastAPI REST API"]
+        Core["Pipeline Orchestrator"]
+    end
+
+    subgraph AI_Agents ["AI Agents"]
+        Manager["Manager Agent"]
+        Workers["Specialized Worker Agents"]
+    end
+
+    subgraph ML_Engine ["ML Engine"]
+        Services["ML Tool Services"]
+        Viz["Visualization Engine"]
+    end
+
+    subgraph Outputs ["Outputs"]
+        Artifacts["Artifacts (Models, SHAP)"]
+        Reports["Reports (Markdown, PDF)"]
+    end
+
+    Web -->|"HTTP Requests"| API
+    CLI -->|"Direct Execution"| Core
+    API -->|"Triggers Pipeline"| Core
+    
+    Core -->|"Delegates Task"| Manager
+    Manager -->|"Orchestrates"| Workers
+    
+    Workers -->|"Invokes Tools"| Services
+    Workers -->|"Generates Charts"| Viz
+    
+    Services -->|"Serializes"| Artifacts
+    Viz -->|"Saves Visuals"| Artifacts
+    Services -->|"Compiles"| Reports
 ```
 
 ### Core Components
