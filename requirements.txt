@@ -1,0 +1,50 @@
+# ── Core Framework ───────────────────────────────────────────────────────────
+crewai>=0.100.0
+crewai-tools>=0.17.0
+
+# ── Data Processing ──────────────────────────────────────────────────────────
+pandas>=2.0.0
+numpy>=1.24.0
+
+# ── Machine Learning ─────────────────────────────────────────────────────────
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+lightgbm>=4.0.0
+
+# ── Explainability ───────────────────────────────────────────────────────────
+shap>=0.43.0
+
+# ── Configuration & Validation ───────────────────────────────────────────────
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+
+# ── Serialization & Persistence ──────────────────────────────────────────────
+joblib>=1.3.0
+
+# ── Excel & PDF Export ───────────────────────────────────────────────────────
+openpyxl>=3.1.0
+reportlab>=4.0.0
+
+# ── Database ─────────────────────────────────────────────────────────────────
+sqlalchemy>=2.0.0
+
+# ── Authentication ───────────────────────────────────────────────────────────
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
+
+# ── Hyperparameter Optimization (optional) ───────────────────────────────────
+optuna>=3.0.0
+
+# ── System Monitoring ────────────────────────────────────────────────────────
+psutil>=5.9.0
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+
+# ── LLM Provider ─────────────────────────────────────────────────────────────
+# Cerebras is supported via LiteLLM which is bundled with CrewAI
+# No additional package needed; set CEREBRAS_API_KEY in .env

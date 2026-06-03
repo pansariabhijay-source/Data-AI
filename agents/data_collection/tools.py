@@ -1,0 +1,226 @@
+"""
+Data Collection Tool — ingest, profile, and validate datasets.
+
+Supports CSV, database (SQLAlchemy), and URL ingestion.
+Performs automatic schema detection, problem-type inference, and data profiling.
+"""
+
+from __future__ import annotations
+
+import json
+import traceback
+from pathlib import Path
+from typing import Any, Optional
+
+import numpy as np
+import pandas as pd
+
+from core.config import DataCollectionConfig, Settings
+from core.constants import ProblemType
+from core.exceptions import DataCollectionError
+from core.logging_config import get_logger, log_stage_timing
+from core.state import DatasetMetadata, ErrorReport, PipelineState
+from core.utils import get_memory_usage_mb, infer_column_types, optimize_dataframe_memory
+from core.validation import (
+    compute_quality_score,
+    detect_class_imbalance,
+    detect_target_leakage,
+    validate_dataframe,
+)
+
+logger = get_logger("data_collection")
+
+
+class DataCollectionService:
+    """Deterministic data ingestion and profiling logic."""
+
+    def __init__(self, config: DataCollectionConfig) -> None:
+        self._config = config
+
+    def load_csv(self, file_path: str, chunk_size: Optional[int] = None) -> pd.DataFrame:
+        """Load CSV with optional chunked reading for large files."""
+        path = Path(file_path)
+        if not path.exists():
+            raise DataCollectionError(f"File not found: {file_path}")
+        if not path.suffix.lower() in (".csv", ".tsv", ".txt"):
+            raise DataCollectionError(f"Unsupported file type: {path.suffix}")
+
+        sep = "\t" if path.suffix.lower() == ".tsv" else ","
+        file_size_mb = path.stat().st_size / (1024 * 1024)
+        effective_chunk = chunk_size or self._config.chunk_size
+
+        if file_size_mb > 100:
+            logger.info(f"Large file ({file_size_mb:.0f}MB), using chunked loading")
+            chunks = []
+            for chunk in pd.read_csv(path, sep=sep, chunksize=effective_chunk, low_memory=False):
+                chunks.append(chunk)
+            df = pd.concat(chunks, ignore_index=True)
+        else:
+            df = pd.read_csv(path, sep=sep, low_memory=False)
+
+        logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns from {path.name}")
+        return df
+
+    def load_database(self, connection_string: str, query: str) -> pd.DataFrame:
+        """Load data from a SQL database."""
+        try:
+            from sqlalchemy import create_engine, text
+            engine = create_engine(connection_string)
+            with engine.connect() as conn:
+                df = pd.read_sql(text(query), conn)
+            logger.info(f"Loaded {len(df)} rows from database")
+            return df
+        except Exception as e:
+            raise DataCollectionError(f"Database load failed: {e}") from e
+
+    def profile_dataset(self, df: pd.DataFrame, target: Optional[str] = None) -> DatasetMetadata:
+        """Generate comprehensive dataset profile."""
+        col_types = infer_column_types(df)
+        null_counts = df.isnull().sum().to_dict()
+        null_pcts = df.isnull().mean().to_dict()
+
+        metadata = DatasetMetadata(
+            n_rows=len(df),
+            n_columns=len(df.columns),
+            column_names=list(df.columns),
+            dtypes={col: str(dtype) for col, dtype in df.dtypes.items()},
+            memory_usage_mb=get_memory_usage_mb(df),
+            null_counts={k: int(v) for k, v in null_counts.items()},
+            null_percentages={k: round(float(v), 4) for k, v in null_pcts.items()},
+            numeric_columns=col_types["numeric"],
+            categorical_columns=col_types["categorical"],
+            datetime_columns=col_types["datetime"],
+            boolean_columns=col_types["boolean"],
+            target_column=target,
+            unique_counts={col: int(df[col].nunique()) for col in df.columns},
+        )
+        return metadata
+
+    def detect_problem_type(self, df: pd.DataFrame, target: Optional[str] = None) -> ProblemType:
+        """Heuristic-based problem type detection."""
+        if target is None or target not in df.columns:
+            logger.info("No target column — defaulting to clustering")
+            return ProblemType.CLUSTERING
+
+        col = df[target]
+        if pd.api.types.is_numeric_dtype(col):
+            n_unique = col.nunique()
+            ratio = n_unique / max(len(df), 1)
+            if n_unique <= 20 or ratio < 0.05:
+                return ProblemType.CLASSIFICATION
+            return ProblemType.REGRESSION
+        else:
+            return ProblemType.CLASSIFICATION
+
+    @log_stage_timing("data_collection")
+    def run(self, state: PipelineState, settings: Settings) -> PipelineState:
+        """Execute the full data collection stage."""
+        if not state.raw_data_path:
+            raise DataCollectionError("No raw_data_path set in pipeline state")
+
+        # Load data
+        df = self.load_csv(state.raw_data_path)
+
+        # Optimize memory
+        df = optimize_dataframe_memory(df)
+
+        # Validate
+        issues = validate_dataframe(df, max_cols=self._config.max_columns)
+        if issues:
+            for issue in issues:
+                logger.warning(f"Data validation issue: {issue}")
+            state.data_quality_flags["validation_issues"] = issues
+
+        # Detect problem type
+        problem_type = self.detect_problem_type(df, state.target_column)
+        state.problem_type = problem_type.value
+        logger.info(f"Detected problem type: {problem_type.value}")
+
+        # Profile
+        metadata = self.profile_dataset(df, state.target_column)
+        metadata.file_path = state.raw_data_path
+        state.dataset_metadata = metadata
+
+        # Quality score
+        quality = compute_quality_score(df)
+        state.data_quality_flags["quality_score"] = quality
+        logger.info(f"Data quality score: {quality:.4f}")
+
+        # Leakage check
+        if state.target_column and state.target_column in df.columns:
+            leaked = detect_target_leakage(df, state.target_column)
+            if leaked:
+                state.data_quality_flags["potential_leakage"] = leaked
+                state.add_error(ErrorReport(
+                    severity="high", stage="data_collection",
+                    error_type="potential_leakage",
+                    root_cause=f"Columns with >0.95 correlation to target: {leaked}",
+                    recommended_fix="Review and potentially remove leaked features",
+                    retryable=False,
+                ))
+
+            # Class imbalance check
+            if problem_type == ProblemType.CLASSIFICATION:
+                imbalance = detect_class_imbalance(df[state.target_column])
+                if imbalance:
+                    state.data_quality_flags["class_imbalance"] = imbalance
+                    logger.warning(f"Class imbalance detected: {imbalance}")
+
+        # Save cleaned path (same as raw for now — preprocessing will create new)
+        state.cleaned_data_path = state.raw_data_path
+        state.mark_stage_end("data_collection")
+        return state
+
+
+# ── Singleton service ───────────────────────────────────────────────────────
+
+_service: Optional[DataCollectionService] = None
+_state: Optional[PipelineState] = None
+_settings: Optional[Settings] = None
+
+
+def init_data_collection(state: PipelineState, settings: Settings) -> None:
+    global _service, _state, _settings
+    _service = DataCollectionService(settings.data_collection)
+    _state = state
+    _settings = settings
+
+
+def collect_data(instruction: str) -> str:
+    """Collect and profile a dataset. The instruction should describe what data to load.
+
+    This tool loads the dataset from the configured path, profiles it,
+    detects the ML problem type, checks for data quality issues, and
+    validates the target column.
+
+    Args:
+        instruction: Natural language description of data collection task.
+
+    Returns:
+        JSON summary of data collection results.
+    """
+    global _service, _state, _settings
+    if _service is None or _state is None or _settings is None:
+        return json.dumps({"error": "Data collection service not initialized"})
+    try:
+        _state.mark_stage_start("data_collection")
+        _state = _service.run(_state, _settings)
+        result = {
+            "status": "success",
+            "problem_type": _state.problem_type,
+            "n_rows": _state.dataset_metadata.n_rows if _state.dataset_metadata else 0,
+            "n_columns": _state.dataset_metadata.n_columns if _state.dataset_metadata else 0,
+            "quality_score": _state.data_quality_flags.get("quality_score", 0),
+            "issues": _state.data_quality_flags.get("validation_issues", []),
+        }
+        return json.dumps(result, default=str)
+    except Exception as e:
+        logger.exception("Data collection failed")
+        _state.add_error(ErrorReport(
+            severity="critical", stage="data_collection",
+            error_type=type(e).__name__, root_cause=str(e),
+            traceback_str=traceback.format_exc(),
+            recommended_fix="Check data path and format",
+            retryable=True,
+        ))
+        return json.dumps({"error": str(e)})

@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Axiom AI - Agent Marketplace</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&amp;family=Inter:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            background-color: #0b1326;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(255, 193, 116, 0.05) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(5, 102, 217, 0.1) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(199, 200, 255, 0.05) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .pro-card {
+            border: 1px solid rgba(255, 193, 116, 0.3);
+            background: linear-gradient(135deg, rgba(255, 193, 116, 0.05) 0%, rgba(11, 19, 38, 0.4) 100%);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-highest": "#2d3449",
+                      "surface-container-low": "#131b2e",
+                      "primary-fixed": "#ffddb8",
+                      "on-primary": "#472a00",
+                      "surface-dim": "#0b1326",
+                      "surface-bright": "#31394d",
+                      "on-primary-fixed-variant": "#653e00",
+                      "surface": "#0b1326",
+                      "surface-tint": "#ffb95f",
+                      "surface-container-high": "#222a3d",
+                      "on-surface": "#dae2fd",
+                      "on-secondary-container": "#e6ecff",
+                      "secondary": "#adc6ff",
+                      "on-primary-fixed": "#2a1700",
+                      "error-container": "#93000a",
+                      "error": "#ffb4ab",
+                      "on-tertiary-fixed-variant": "#2f2ebe",
+                      "on-background": "#dae2fd",
+                      "tertiary": "#c7c8ff",
+                      "outline": "#a08e7a",
+                      "on-error-container": "#ffdad6",
+                      "primary-fixed-dim": "#ffb95f",
+                      "secondary-fixed": "#d8e2ff",
+                      "on-secondary": "#002e6a",
+                      "inverse-on-surface": "#283044",
+                      "on-tertiary": "#1000a9",
+                      "primary-container": "#f59e0b",
+                      "on-surface-variant": "#d8c3ad",
+                      "tertiary-container": "#a7a9ff",
+                      "primary": "#ffc174",
+                      "on-error": "#690005",
+                      "inverse-surface": "#dae2fd",
+                      "secondary-fixed-dim": "#adc6ff",
+                      "on-primary-container": "#613b00",
+                      "tertiary-fixed": "#e1e0ff",
+                      "surface-container": "#171f33",
+                      "on-secondary-fixed": "#001a42",
+                      "tertiary-fixed-dim": "#c0c1ff",
+                      "on-secondary-fixed-variant": "#004395",
+                      "secondary-container": "#0566d9",
+                      "on-tertiary-fixed": "#07006c",
+                      "on-tertiary-container": "#2b29bb",
+                      "background": "#0b1326",
+                      "surface-container-lowest": "#060e20",
+                      "outline-variant": "#534434",
+                      "inverse-primary": "#855300",
+                      "surface-variant": "#2d3449"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-mobile": "16px",
+                      "gutter": "24px",
+                      "margin-desktop": "48px",
+                      "container-max": "1440px",
+                      "unit": "4px"
+              },
+              "fontFamily": {
+                      "headline-md": ["Outfit"],
+                      "label-caps": ["Inter"],
+                      "display-lg": ["Outfit"],
+                      "body-sm": ["Inter"],
+                      "body-md": ["Inter"],
+                      "display-lg-mobile": ["Outfit"]
+              },
+              "fontSize": {
+                      "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                      "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "display-lg-mobile": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="text-on-surface font-body-md selection:bg-primary/30">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-margin-desktop h-16 bg-white/5 backdrop-blur-xl border-b border-white/10 shadow-xl">
+<div class="flex items-center gap-8">
+<span class="font-display-lg text-headline-md font-bold text-primary">Axiom AI</span>
+<nav class="hidden md:flex gap-6">
+<a class="font-body-md text-on-surface-variant hover:bg-white/10 transition-all duration-300 px-3 py-1 rounded" href="#">Explore</a>
+<a class="font-body-md text-primary border-b-2 border-primary px-3 py-1" href="#">Marketplace</a>
+<a class="font-body-md text-on-surface-variant hover:bg-white/10 transition-all duration-300 px-3 py-1 rounded" href="#">Community</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" data-icon="search">search</span>
+<input class="bg-black/20 border-0 border-b border-white/20 focus:border-primary focus:ring-0 pl-10 pr-4 py-2 w-64 transition-all" placeholder="Search agents..." type="text"/>
+</div>
+<button class="p-2 rounded-full hover:bg-white/10 transition-all"><span class="material-symbols-outlined" data-icon="notifications">notifications</span></button>
+<button class="p-2 rounded-full hover:bg-white/10 transition-all"><span class="material-symbols-outlined" data-icon="settings">settings</span></button>
+<div class="w-8 h-8 rounded-full bg-gradient-to-tr from-primary to-amber-200 overflow-hidden">
+<img alt="Administrator profile" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA22iWKFrgG77V28hLxGTU6qfROBTnMOv4a-Vq7KGTrwC1ABfC72m4TlUPsBKK9_e7vVU_M0fvMS4WUVoz7_Xq1V7EJQ580Rw3G1PZW3DR4kZu3J5C7Cz1QfSUWxHJc3BxKbkKwoKbwpjeAVIMANlnEgFtCv34UIswtfwcotaAHA7H-w_Vi22qnPib0f7VTrfDHEP07vKPzlKjDiu6dr1si8BgTWu8qg8DICjThY_0tC9NJXrwNMQkWeeKxfDabzkF9IHq0t-s2Xno"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-screen flex flex-col pt-20 pb-8 bg-surface-dim/40 backdrop-blur-2xl border-r border-white/10 shadow-2xl w-64 hidden md:flex">
+<div class="px-6 mb-8">
+<div class="flex items-center gap-3 mb-2">
+<div class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
+<span class="material-symbols-outlined text-primary" data-icon="axiom">category</span>
+</div>
+<div>
+<div class="font-headline-md text-headline-md text-primary text-sm leading-tight">Axiom Core</div>
+<div class="text-[10px] uppercase tracking-widest text-on-surface-variant/60">Enterprise Tier</div>
+</div>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="text-on-surface-variant/70 px-6 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-md">Dashboard</span>
+</a>
+<a class="text-on-surface-variant/70 px-6 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+<span class="font-body-md">Workflows</span>
+</a>
+<a class="bg-primary-container/20 text-primary border-r-4 border-primary px-6 py-3 flex items-center gap-3 active:translate-x-1 transition-transform duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="memory">memory</span>
+<span class="font-body-md">Agent Nodes</span>
+</a>
+<a class="text-on-surface-variant/70 px-6 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+<span class="font-body-md">Data Vault</span>
+</a>
+<a class="text-on-surface-variant/70 px-6 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="shield">shield</span>
+<span class="font-body-md">Security</span>
+</a>
+</nav>
+<div class="px-6 mt-auto space-y-4">
+<button class="w-full bg-gradient-to-r from-amber-400 to-primary text-on-primary font-bold py-3 rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] transition-transform active:scale-95">
+                Upgrade to Pro
+            </button>
+<div class="space-y-1">
+<a class="text-on-surface-variant/50 hover:text-on-surface text-sm flex items-center gap-2 px-2 py-1" href="#">
+<span class="material-symbols-outlined text-sm" data-icon="menu_book">menu_book</span> Documentation
+                </a>
+<a class="text-on-surface-variant/50 hover:text-on-surface text-sm flex items-center gap-2 px-2 py-1" href="#">
+<span class="material-symbols-outlined text-sm" data-icon="contact_support">contact_support</span> Support
+                </a>
+</div>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="md:pl-64 pt-20 min-h-screen">
+<div class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-8">
+<!-- Featured Section -->
+<section class="mb-12">
+<div class="relative overflow-hidden rounded-3xl glass-panel p-8 md:p-12 flex flex-col md:flex-row items-center gap-10">
+<!-- Background Mesh -->
+<div class="absolute inset-0 -z-10 bg-gradient-to-br from-secondary/10 via-transparent to-primary/10"></div>
+<div class="absolute -top-24 -right-24 w-96 h-96 bg-primary/20 blur-[100px] rounded-full"></div>
+<div class="flex-1 space-y-6">
+<div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold tracking-widest uppercase">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span> New Release
+                        </div>
+<h1 class="font-display-lg text-display-lg-mobile md:text-display-lg text-white">Axiom-v5-Beta</h1>
+<p class="text-on-surface-variant text-lg max-w-xl">Our most advanced reasoning engine yet. Featuring sub-100ms latency, enhanced multi-modal understanding, and autonomous node-orchestration capabilities.</p>
+<div class="flex flex-wrap gap-4">
+<button class="bg-gradient-to-r from-amber-400 to-primary text-on-primary font-bold px-8 py-4 rounded-xl flex items-center gap-2 hover:shadow-[0_0_20px_rgba(255,193,116,0.4)] transition-all">
+                                Deploy Now <span class="material-symbols-outlined" data-icon="rocket_launch">rocket_launch</span>
+</button>
+<button class="bg-white/5 border border-white/10 hover:bg-white/10 px-8 py-4 rounded-xl font-bold transition-all">
+                                Read Whitepaper
+                            </button>
+</div>
+</div>
+<div class="relative w-full md:w-1/3 aspect-square max-w-sm">
+<div class="absolute inset-0 bg-gradient-to-tr from-primary/30 to-secondary/30 blur-3xl animate-pulse"></div>
+<img alt="Abstract AI Core Representation" class="w-full h-full object-cover rounded-2xl relative z-10 border border-white/20 shadow-2xl" data-alt="A futuristic abstract digital sculpture representing an AI core. The structure consists of glowing crystalline geometry and liquid-like golden light pulsing from within. The background is a dark, cinematic space with subtle atmospheric dust and blue-tinted secondary light leaks, creating a professional and visionary technical atmosphere." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAuhR4oukLzOLmIttLI2P606-6ac9XdgbWToCZLma05fW9ZSlgsF_agyWBBpTtc8JdbUkznn_gAJMgL6sI4VWIGpNm93-0G-nFpMtY9eYubYmx0NKdLRb3t0KMBQwrDZUL2frpUhSLiizRa-ZEEuxHT8KfDXfPBjbXoihBNn4DePnrkT8nWF9pyBIn7_WkCb6x9_oMG5-hf5AVqUo-7_dDmyRU2Dd8C96S8anSNE5HgA41u_OZ4cHQxsHFEbl_OvYcMKdenPYNJcu8"/>
+</div>
+</div>
+</section>
+<!-- Search & Filters -->
+<section class="mb-10 space-y-6">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+<h2 class="font-display-lg text-headline-md text-white">Agent Library</h2>
+<div class="flex flex-wrap gap-2">
+<button class="px-5 py-2 rounded-full bg-primary text-on-primary font-bold text-sm">All Agents</button>
+<button class="px-5 py-2 rounded-full glass-panel text-on-surface-variant hover:text-white transition-colors text-sm">NLP</button>
+<button class="px-5 py-2 rounded-full glass-panel text-on-surface-variant hover:text-white transition-colors text-sm">Computer Vision</button>
+<button class="px-5 py-2 rounded-full glass-panel text-on-surface-variant hover:text-white transition-colors text-sm">Forecasting</button>
+<button class="px-5 py-2 rounded-full glass-panel text-on-surface-variant hover:text-white transition-colors text-sm">Data Cleaning</button>
+</div>
+</div>
+</section>
+<!-- Agent Grid -->
+<section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-gutter">
+<!-- Card 1 (Pro) -->
+<div class="glass-panel pro-card p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-primary/20 border border-primary/30 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="psychology">psychology</span>
+</div>
+<div class="p-2 rounded-lg bg-amber-400/10 text-amber-400">
+<span class="material-symbols-outlined text-sm" data-icon="lock" data-weight="fill" style="font-variation-settings: 'FILL' 1;">lock</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">Sentiment-GPT-4</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">Advanced linguistic analysis engine capable of detecting nuanced sarcasm and emotional shifts in complex datasets.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">High Precision</span>
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Multilingual</span>
+</div>
+<button class="w-full bg-primary text-on-primary font-bold py-3 rounded-xl flex items-center justify-center gap-2 group-hover:shadow-[0_0_15px_rgba(255,193,116,0.3)] transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+<!-- Card 2 -->
+<div class="glass-panel p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-secondary/10 border border-secondary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-3xl" data-icon="trending_up">trending_up</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">XGBoost-Regressor</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">Optimized gradient boosting framework for high-speed tabular data forecasting and predictive modeling.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Low Latency</span>
+</div>
+<button class="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+<!-- Card 3 (Pro) -->
+<div class="glass-panel pro-card p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-primary/20 border border-primary/30 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="visibility">visibility</span>
+</div>
+<div class="p-2 rounded-lg bg-amber-400/10 text-amber-400">
+<span class="material-symbols-outlined text-sm" data-icon="lock" data-weight="fill" style="font-variation-settings: 'FILL' 1;">lock</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">Vision-Segmenter</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">Real-time object segmentation and pixel-level classification for autonomous visual monitoring systems.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">GPU Optimized</span>
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Pro</span>
+</div>
+<button class="w-full bg-primary text-on-primary font-bold py-3 rounded-xl flex items-center justify-center gap-2 group-hover:shadow-[0_0_15px_rgba(255,193,116,0.3)] transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+<!-- Card 4 -->
+<div class="glass-panel p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-tertiary/10 border border-tertiary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary text-3xl" data-icon="cleaning_services">cleaning_services</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">Data-Refiner</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">Automated outlier detection and missing value imputation for pipeline data preprocessing.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Core Utility</span>
+</div>
+<button class="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+<!-- Card 5 -->
+<div class="glass-panel p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-secondary/10 border border-secondary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-3xl" data-icon="translate">translate</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">Omni-Transcriber</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">Multi-source audio transcription with automatic speaker diarization and language detection.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Fast</span>
+</div>
+<button class="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+<!-- Card 6 (Pro) -->
+<div class="glass-panel pro-card p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-primary/20 border border-primary/30 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-3xl" data-icon="security">security</span>
+</div>
+<div class="p-2 rounded-lg bg-amber-400/10 text-amber-400">
+<span class="material-symbols-outlined text-sm" data-icon="lock" data-weight="fill" style="font-variation-settings: 'FILL' 1;">lock</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">Anomaly-Sentinel</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">High-fidelity cybersecurity agent for real-time network traffic anomaly detection and threat scoring.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Real-time</span>
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Encrypted</span>
+</div>
+<button class="w-full bg-primary text-on-primary font-bold py-3 rounded-xl flex items-center justify-center gap-2 group-hover:shadow-[0_0_15px_rgba(255,193,116,0.3)] transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+<!-- Card 7 -->
+<div class="glass-panel p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-tertiary/10 border border-tertiary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary text-3xl" data-icon="analytics">analytics</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">Cluster-Engine</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">Unsupervised learning node for identifying hidden patterns and segments in high-dimensional data.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Unsupervised</span>
+</div>
+<button class="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+<!-- Card 8 -->
+<div class="glass-panel p-6 rounded-3xl flex flex-col hover:scale-[1.02] transition-all duration-300 group">
+<div class="flex justify-between items-start mb-6">
+<div class="w-14 h-14 rounded-2xl bg-secondary/10 border border-secondary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-3xl" data-icon="summarize">summarize</span>
+</div>
+</div>
+<h3 class="font-headline-md text-white mb-2">Logic-Summarizer</h3>
+<p class="text-on-surface-variant text-sm mb-6 flex-1">Condensed reporting engine that converts massive datasets into executive-level logical summaries.</p>
+<div class="flex flex-wrap gap-2 mb-6">
+<span class="text-[10px] px-2 py-1 rounded bg-white/5 border border-white/10 text-on-surface-variant font-bold uppercase tracking-wider">Efficient</span>
+</div>
+<button class="w-full bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all">
+                        Install Node <span class="material-symbols-outlined text-sm" data-icon="add_circle">add_circle</span>
+</button>
+</div>
+</section>
+</div>
+</main>
+<!-- FAB (Suppressed on this layout per guidelines) -->
+</body></html>

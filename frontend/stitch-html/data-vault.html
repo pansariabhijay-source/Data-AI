@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-error-container": "#ffdad6",
+                      "tertiary-fixed-dim": "#c0c1ff",
+                      "on-surface": "#dae2fd",
+                      "on-background": "#dae2fd",
+                      "surface-container-low": "#131b2e",
+                      "outline-variant": "#534434",
+                      "outline": "#a08e7a",
+                      "primary-container": "#f59e0b",
+                      "on-primary-fixed-variant": "#653e00",
+                      "inverse-on-surface": "#283044",
+                      "on-primary": "#472a00",
+                      "on-primary-fixed": "#2a1700",
+                      "on-error": "#690005",
+                      "surface-dim": "#0b1326",
+                      "secondary": "#adc6ff",
+                      "tertiary-container": "#a7a9ff",
+                      "secondary-container": "#0566d9",
+                      "error-container": "#93000a",
+                      "error": "#ffb4ab",
+                      "surface-container-lowest": "#060e20",
+                      "surface-tint": "#ffb95f",
+                      "primary": "#ffc174",
+                      "inverse-primary": "#855300",
+                      "on-secondary-fixed": "#001a42",
+                      "primary-fixed-dim": "#ffb95f",
+                      "on-tertiary": "#1000a9",
+                      "on-secondary": "#002e6a",
+                      "surface-bright": "#31394d",
+                      "on-tertiary-fixed": "#07006c",
+                      "on-tertiary-fixed-variant": "#2f2ebe",
+                      "surface-container": "#171f33",
+                      "primary-fixed": "#ffddb8",
+                      "on-secondary-container": "#e6ecff",
+                      "surface-container-high": "#222a3d",
+                      "on-surface-variant": "#d8c3ad",
+                      "surface-variant": "#2d3449",
+                      "on-tertiary-container": "#2b29bb",
+                      "secondary-fixed-dim": "#adc6ff",
+                      "secondary-fixed": "#d8e2ff",
+                      "tertiary-fixed": "#e1e0ff",
+                      "on-primary-container": "#613b00",
+                      "inverse-surface": "#dae2fd",
+                      "background": "#0b1326",
+                      "surface-container-highest": "#2d3449",
+                      "surface": "#0b1326",
+                      "on-secondary-fixed-variant": "#004395",
+                      "tertiary": "#c7c8ff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "4px",
+                      "margin-mobile": "16px",
+                      "container-max": "1440px",
+                      "gutter": "24px",
+                      "margin-desktop": "48px"
+              },
+              "fontFamily": {
+                      "display-lg-mobile": ["Outfit"],
+                      "headline-md": ["Outfit"],
+                      "body-md": ["Inter"],
+                      "display-lg": ["Outfit"],
+                      "body-sm": ["Inter"],
+                      "label-caps": ["Inter"]
+              },
+              "fontSize": {
+                      "display-lg-mobile": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+        body {
+            background: radial-gradient(circle at 0% 0%, #1a233b 0%, #0b1326 100%);
+            color: #dae2fd;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .rim-light {
+            box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+        }
+        .active-glow {
+            box-shadow: 0 0 15px rgba(255, 193, 116, 0.3);
+        }
+        .pro-button {
+            background: linear-gradient(135deg, #ffc174 0%, #f59e0b 100%);
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+        }
+        .lineage-node {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .lineage-path {
+            stroke-dasharray: 4;
+            animation: dash 20s linear infinite;
+        }
+        @keyframes dash {
+            to { stroke-dashoffset: -100; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex font-body-md text-body-md overflow-x-hidden">
+<!-- SideNavBar -->
+<aside class="h-screen w-64 left-0 sticky bg-surface-dim/80 backdrop-blur-2xl border-r border-white/10 shadow-[0px_4px_20px_rgba(0,0,0,0.5)] flex flex-col py-margin-desktop">
+<div class="px-6 mb-10">
+<h1 class="font-headline-md text-headline-md text-primary tracking-tight">Axiom Command</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant mt-1 opacity-60">Enterprise ML v2.4</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-caps text-label-caps">Dashboard</span>
+</a>
+<a class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined">account_tree</span>
+<span class="font-label-caps text-label-caps">Workflows</span>
+</a>
+<a class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined">memory</span>
+<span class="font-label-caps text-label-caps">Agent Nodes</span>
+</a>
+<a class="text-primary bg-white/10 border-r-4 border-primary px-4 py-3 flex items-center gap-3" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">storage</span>
+<span class="font-label-caps text-label-caps">Data Vault</span>
+</a>
+<a class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors" href="#">
+<span class="material-symbols-outlined">security</span>
+<span class="font-label-caps text-label-caps">Security</span>
+</a>
+</nav>
+<div class="px-4 mt-auto space-y-4">
+<button class="w-full pro-button text-on-primary font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all">
+<span class="material-symbols-outlined text-[18px]">verified</span>
+<span class="font-label-caps text-label-caps">Upgrade to Pro</span>
+</button>
+<div class="pt-4 border-t border-white/5">
+<a class="text-on-surface-variant px-4 py-2 flex items-center gap-3 hover:text-on-surface text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">help</span>
+<span>Help</span>
+</a>
+<a class="text-on-surface-variant px-4 py-2 flex items-center gap-3 hover:text-on-surface text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">terminal</span>
+<span>Logs</span>
+</a>
+</div>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="flex-1 p-margin-desktop overflow-y-auto">
+<!-- Top Header -->
+<header class="flex justify-between items-center mb-8">
+<div>
+<h2 class="font-display-lg text-display-lg font-bold text-white tracking-tight">Governance Center</h2>
+<p class="text-on-surface-variant mt-2 max-w-2xl opacity-80">Oversee ecosystem compliance, audit data lineage, and monitor structural integrity across all enterprise nodes.</p>
+</div>
+<div class="flex gap-4">
+<button class="glass-panel px-6 py-2 rounded-lg text-on-surface flex items-center gap-2 hover:bg-white/10 transition-all border-white/10">
+<span class="material-symbols-outlined">file_download</span>
+<span>Export Audit</span>
+</button>
+<button class="bg-secondary-container text-on-secondary-container px-6 py-2 rounded-lg font-semibold hover:brightness-110 transition-all">
+                    New Catalog Asset
+                </button>
+</div>
+</header>
+<!-- Data Health Dashboard -->
+<section class="grid grid-cols-1 md:grid-cols-3 gap-gutter mb-8">
+<div class="glass-panel p-6 rounded-xl rim-light relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary/5 blur-3xl -mr-16 -mt-16 group-hover:bg-primary/10 transition-all"></div>
+<div class="flex justify-between items-start mb-4">
+<span class="font-label-caps text-label-caps text-primary tracking-widest">DATA QUALITY SCORE</span>
+<span class="material-symbols-outlined text-primary">verified_user</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-bold text-white">98.4</span>
+<span class="text-green-400 font-semibold text-sm">+2.1%</span>
+</div>
+<div class="mt-4 h-1.5 bg-white/5 rounded-full overflow-hidden">
+<div class="h-full bg-primary active-glow" style="width: 98.4%"></div>
+</div>
+<p class="text-xs text-on-surface-variant mt-4 font-medium italic opacity-70">Calculated across 1.4PB of indexed telemetry.</p>
+</div>
+<div class="glass-panel p-6 rounded-xl rim-light relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-32 h-32 bg-secondary/5 blur-3xl -mr-16 -mt-16 group-hover:bg-secondary/10 transition-all"></div>
+<div class="flex justify-between items-start mb-4">
+<span class="font-label-caps text-label-caps text-secondary tracking-widest">SCHEMA DRIFT</span>
+<span class="material-symbols-outlined text-secondary">analytics</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-bold text-white">LOW</span>
+<span class="text-on-surface-variant font-semibold text-sm">2 Deltas</span>
+</div>
+<div class="mt-4 flex gap-1">
+<div class="h-4 w-1/6 bg-secondary/40 rounded-sm"></div>
+<div class="h-4 w-1/6 bg-secondary/40 rounded-sm"></div>
+<div class="h-4 w-1/6 bg-white/5 rounded-sm"></div>
+<div class="h-4 w-1/6 bg-white/5 rounded-sm"></div>
+<div class="h-4 w-1/6 bg-white/5 rounded-sm"></div>
+<div class="h-4 w-1/6 bg-white/5 rounded-sm"></div>
+</div>
+<p class="text-xs text-on-surface-variant mt-4 font-medium opacity-70">Minor structural changes in 'Financial_Master_v2'.</p>
+</div>
+<div class="glass-panel p-6 rounded-xl rim-light relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-32 h-32 bg-error/5 blur-3xl -mr-16 -mt-16 group-hover:bg-error/10 transition-all"></div>
+<div class="flex justify-between items-start mb-4">
+<span class="font-label-caps text-label-caps text-error tracking-widest">PII DETECTION</span>
+<span class="material-symbols-outlined text-error">policy</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="text-4xl font-bold text-white">SECURE</span>
+<span class="text-on-surface-variant font-semibold text-sm">0 Risks</span>
+</div>
+<div class="mt-4 flex items-center gap-2">
+<span class="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+<span class="text-sm font-medium text-on-surface-variant">Real-time scanner active</span>
+</div>
+<p class="text-xs text-on-surface-variant mt-4 font-medium opacity-70">Compliance validated against GDPR / CCPA standards.</p>
+</div>
+</section>
+<!-- Bento Layout: Lineage & Governance -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter mb-8">
+<!-- Lineage Map Visualization -->
+<div class="lg:col-span-2 glass-panel p-8 rounded-2xl rim-light min-h-[400px] flex flex-col">
+<div class="flex justify-between items-center mb-10">
+<h3 class="font-headline-md text-headline-md text-white">Global Data Lineage</h3>
+<div class="flex items-center gap-4">
+<select class="bg-white/5 border border-white/10 rounded-lg px-4 py-1.5 text-sm focus:ring-primary focus:border-primary">
+<option>Production Environment</option>
+<option>Staging Flow</option>
+</select>
+<button class="material-symbols-outlined text-on-surface-variant hover:text-white transition-colors">fullscreen</button>
+</div>
+</div>
+<div class="flex-1 relative flex items-center justify-between px-10">
+<!-- Visualization Elements -->
+<div class="lineage-node p-4 rounded-xl w-40 text-center border-l-4 border-primary">
+<span class="material-symbols-outlined text-primary mb-2">cloud_download</span>
+<div class="text-sm font-bold">AWS S3 Ingest</div>
+<div class="text-[10px] text-on-surface-variant uppercase tracking-tighter">Raw Layer</div>
+</div>
+<div class="absolute inset-0 flex items-center justify-around pointer-events-none opacity-20">
+<svg class="w-full h-24" viewbox="0 0 800 100">
+<path class="lineage-path" d="M 120 50 Q 400 50 680 50" fill="none" stroke="#ffc174" stroke-width="2"></path>
+<path class="lineage-path" d="M 120 50 Q 400 -20 680 50" fill="none" stroke="#adc6ff" stroke-width="1.5"></path>
+<path class="lineage-path" d="M 120 50 Q 400 120 680 50" fill="none" stroke="#c7c8ff" stroke-width="1.5"></path>
+</svg>
+</div>
+<div class="lineage-node p-4 rounded-xl w-44 text-center border-l-4 border-secondary backdrop-blur-3xl scale-110 shadow-2xl relative">
+<div class="absolute -top-3 -right-3 bg-primary text-on-primary text-[10px] px-2 py-0.5 rounded-full font-bold">ACTIVE</div>
+<span class="material-symbols-outlined text-secondary mb-2">auto_fix_high</span>
+<div class="text-sm font-bold">Spark Transformer</div>
+<div class="text-[10px] text-on-surface-variant uppercase tracking-tighter">Refinement</div>
+</div>
+<div class="lineage-node p-4 rounded-xl w-40 text-center border-l-4 border-tertiary">
+<span class="material-symbols-outlined text-tertiary mb-2">hub</span>
+<div class="text-sm font-bold">Feature Store</div>
+<div class="text-[10px] text-on-surface-variant uppercase tracking-tighter">Serving Layer</div>
+</div>
+</div>
+<div class="mt-8 grid grid-cols-3 gap-4 border-t border-white/5 pt-6">
+<div class="text-center">
+<div class="text-on-surface-variant text-[10px] uppercase font-bold tracking-widest">Latency</div>
+<div class="text-white text-lg font-bold">42ms</div>
+</div>
+<div class="text-center">
+<div class="text-on-surface-variant text-[10px] uppercase font-bold tracking-widest">Throughput</div>
+<div class="text-white text-lg font-bold">2.4 GB/s</div>
+</div>
+<div class="text-center">
+<div class="text-on-surface-variant text-[10px] uppercase font-bold tracking-widest">Dependencies</div>
+<div class="text-white text-lg font-bold">14 Nodes</div>
+</div>
+</div>
+</div>
+<!-- Governance Controls -->
+<div class="glass-panel p-8 rounded-2xl rim-light flex flex-col bg-gradient-to-br from-white/5 to-tertiary/5">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-tertiary-fixed-dim">verified_user</span>
+<h3 class="font-headline-md text-headline-md text-white">Policy Controls</h3>
+</div>
+<div class="space-y-6 flex-1">
+<div class="flex items-center justify-between p-4 bg-black/20 rounded-xl">
+<div>
+<div class="text-white font-semibold">PII Auto-Masking</div>
+<div class="text-xs text-on-surface-variant">Dynamically mask sensitive strings</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="flex items-center justify-between p-4 bg-black/20 rounded-xl">
+<div>
+<div class="text-white font-semibold">RBAC Lockout</div>
+<div class="text-xs text-on-surface-variant">Restrict schema modification</div>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+<div class="p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-xl relative overflow-hidden">
+<span class="material-symbols-outlined absolute -right-2 -bottom-2 text-indigo-500/20 text-6xl">lock</span>
+<div class="text-white font-semibold flex items-center gap-2">
+                            Retention Policy
+                        </div>
+<div class="mt-3">
+<div class="text-sm text-on-surface-variant flex justify-between mb-1">
+<span>7 Year Archive</span>
+<span class="text-primary font-bold">ENABLED</span>
+</div>
+<div class="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
+<div class="bg-indigo-500 h-full" style="width: 100%"></div>
+</div>
+</div>
+</div>
+</div>
+<button class="mt-8 glass-panel w-full py-3 rounded-xl border-white/10 text-on-surface hover:bg-white/10 transition-all font-semibold uppercase tracking-widest text-xs">
+                    Apply Global Sync
+                </button>
+</div>
+</div>
+<!-- Cataloged Assets Table -->
+<section class="glass-panel rounded-2xl rim-light overflow-hidden">
+<div class="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
+<h3 class="font-headline-md text-headline-md text-white">Cataloged Assets</h3>
+<div class="flex items-center gap-2">
+<span class="text-sm text-on-surface-variant">Showing 25 of 1,420 assets</span>
+<div class="flex border border-white/10 rounded-lg overflow-hidden ml-4">
+<button class="px-3 py-1 bg-white/10 text-white"><span class="material-symbols-outlined text-[18px]">list</span></button>
+<button class="px-3 py-1 text-on-surface-variant hover:bg-white/5"><span class="material-symbols-outlined text-[18px]">grid_view</span></button>
+</div>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-black/20 text-on-surface-variant">
+<th class="px-6 py-4 font-label-caps text-label-caps tracking-widest">ASSET NAME</th>
+<th class="px-6 py-4 font-label-caps text-label-caps tracking-widest">FORMAT</th>
+<th class="px-6 py-4 font-label-caps text-label-caps tracking-widest">SIZE</th>
+<th class="px-6 py-4 font-label-caps text-label-caps tracking-widest">LAST ACCESSED</th>
+<th class="px-6 py-4 font-label-caps text-label-caps tracking-widest">SENSITIVITY</th>
+<th class="px-6 py-4 font-label-caps text-label-caps tracking-widest">ACTIONS</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-white/5">
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-5">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[20px]">table_chart</span>
+</div>
+<div>
+<div class="text-white font-semibold">financial_ledger_2024_q1</div>
+<div class="text-xs text-on-surface-variant">db.warehouse.finance</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-5">
+<span class="bg-white/5 text-[10px] font-bold px-2 py-1 rounded-md text-on-surface-variant border border-white/10 uppercase">Parquet</span>
+</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant font-medium">42.8 GB</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant">12 mins ago</td>
+<td class="px-6 py-5">
+<span class="flex items-center gap-1.5 text-error text-xs font-bold bg-error/10 px-2.5 py-1 rounded-full border border-error/20">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">security</span>
+                                    Highly Confidential
+                                </span>
+</td>
+<td class="px-6 py-5">
+<button class="text-on-surface-variant hover:text-white transition-colors"><span class="material-symbols-outlined">more_horiz</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-5">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-secondary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary text-[20px]">analytics</span>
+</div>
+<div>
+<div class="text-white font-semibold">user_behavior_logs_streaming</div>
+<div class="text-xs text-on-surface-variant">stream.analytics.clickstream</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-5">
+<span class="bg-white/5 text-[10px] font-bold px-2 py-1 rounded-md text-on-surface-variant border border-white/10 uppercase">JSON</span>
+</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant font-medium">890.4 MB</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant">2 hours ago</td>
+<td class="px-6 py-5">
+<span class="flex items-center gap-1.5 text-primary text-xs font-bold bg-primary/10 px-2.5 py-1 rounded-full border border-primary/20">
+<span class="material-symbols-outlined text-[14px]">lock_open</span>
+                                    Internal
+                                </span>
+</td>
+<td class="px-6 py-5">
+<button class="text-on-surface-variant hover:text-white transition-colors"><span class="material-symbols-outlined">more_horiz</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-5">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-tertiary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary text-[20px]">public</span>
+</div>
+<div>
+<div class="text-white font-semibold">global_market_indices_public</div>
+<div class="text-xs text-on-surface-variant">db.external.market_data</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-5">
+<span class="bg-white/5 text-[10px] font-bold px-2 py-1 rounded-md text-on-surface-variant border border-white/10 uppercase">CSV</span>
+</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant font-medium">12.5 MB</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant">Yesterday</td>
+<td class="px-6 py-5">
+<span class="flex items-center gap-1.5 text-green-400 text-xs font-bold bg-green-400/10 px-2.5 py-1 rounded-full border border-green-400/20">
+<span class="material-symbols-outlined text-[14px]">public</span>
+                                    Public
+                                </span>
+</td>
+<td class="px-6 py-5">
+<button class="text-on-surface-variant hover:text-white transition-colors"><span class="material-symbols-outlined">more_horiz</span></button>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-6 py-5">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-primary/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-[20px]">person_search</span>
+</div>
+<div>
+<div class="text-white font-semibold">customer_profiles_master</div>
+<div class="text-xs text-on-surface-variant">db.warehouse.crm</div>
+</div>
+</div>
+</td>
+<td class="px-6 py-5">
+<span class="bg-white/5 text-[10px] font-bold px-2 py-1 rounded-md text-on-surface-variant border border-white/10 uppercase">Parquet</span>
+</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant font-medium">1.2 TB</td>
+<td class="px-6 py-5 text-sm text-on-surface-variant">4 mins ago</td>
+<td class="px-6 py-5">
+<span class="flex items-center gap-1.5 text-error text-xs font-bold bg-error/10 px-2.5 py-1 rounded-full border border-error/20">
+<span class="material-symbols-outlined text-[14px]" style="font-variation-settings: 'FILL' 1;">security</span>
+                                    Highly Confidential
+                                </span>
+</td>
+<td class="px-6 py-5">
+<button class="text-on-surface-variant hover:text-white transition-colors"><span class="material-symbols-outlined">more_horiz</span></button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="p-4 bg-white/5 border-t border-white/10 flex justify-center">
+<button class="text-sm font-semibold text-primary hover:underline transition-all">View All 1,420 Assets</button>
+</div>
+</section>
+</main>
+<!-- Background Decoration -->
+<div class="fixed top-0 left-0 w-full h-full pointer-events-none -z-10 overflow-hidden">
+<div class="absolute top-[-10%] right-[-10%] w-[50%] h-[50%] bg-primary/5 rounded-full blur-[120px]"></div>
+<div class="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-secondary/5 rounded-full blur-[100px]"></div>
+</div>
+</body></html>

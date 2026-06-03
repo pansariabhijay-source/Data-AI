@@ -1,0 +1,291 @@
+"""
+Configuration management for the autonomous data science pipeline.
+
+Layered config resolution:
+  1. configs/default.yaml      (base defaults)
+  2. Environment variables     (override per deployment)
+  3. CLI / programmatic        (override per run)
+
+Uses Pydantic v2 Settings for validation, type coercion, and documentation.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Optional
+
+import yaml
+from pydantic import BaseModel, Field, field_validator
+
+from core.constants import (
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_CORRELATION_THRESHOLD,
+    DEFAULT_CV_FOLDS,
+    DEFAULT_EARLY_STOPPING_ROUNDS,
+    DEFAULT_IQR_MULTIPLIER,
+    DEFAULT_LOG_BACKUP_COUNT,
+    DEFAULT_LOG_MAX_BYTES,
+    DEFAULT_MAX_CARDINALITY,
+    DEFAULT_MAX_COLUMNS,
+    DEFAULT_MAX_FEATURE_COUNT,
+    DEFAULT_MAX_NULL_THRESHOLD,
+    DEFAULT_MAX_ONEHOT_CARDINALITY,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_MIN_CLASSIFICATION_F1,
+    DEFAULT_MIN_REGRESSION_R2,
+    DEFAULT_N_JOBS,
+    DEFAULT_OVERFITTING_THRESHOLD,
+    DEFAULT_RANDOM_SEED,
+    DEFAULT_SAMPLE_ROWS,
+    DEFAULT_SELECT_K_BEST,
+    DEFAULT_TEST_RATIO,
+    DEFAULT_TIMEOUT_PER_MODEL,
+    DEFAULT_TRAIN_RATIO,
+    DEFAULT_TUNING_ITERATIONS,
+    DEFAULT_VAL_RATIO,
+    DEFAULT_VARIANCE_THRESHOLD,
+)
+
+
+# ── Nested config sections ──────────────────────────────────────────────────
+
+
+class PipelineConfig(BaseModel):
+    """Top-level pipeline execution settings."""
+
+    random_seed: int = DEFAULT_RANDOM_SEED
+    max_retries: int = DEFAULT_MAX_RETRIES
+    checkpoint_enabled: bool = True
+    artifact_dir: str = "artifacts"
+    report_dir: str = "reports"
+    data_dir: str = "data"
+    log_dir: str = "logs"
+
+
+class LLMConfig(BaseModel):
+    """LLM provider configuration (Cerebras via LiteLLM)."""
+
+    model: str = "cerebras/llama3.1-8b"
+    temperature: float = 0.1
+    max_tokens: int = 4096
+
+    @field_validator("temperature")
+    @classmethod
+    def validate_temperature(cls, v: float) -> float:
+        if not 0.0 <= v <= 2.0:
+            raise ValueError(f"temperature must be in [0.0, 2.0], got {v}")
+        return v
+
+
+class DataCollectionConfig(BaseModel):
+    """Data ingestion settings."""
+
+    chunk_size: int = DEFAULT_CHUNK_SIZE
+    max_columns: int = DEFAULT_MAX_COLUMNS
+    sample_rows_for_profiling: int = DEFAULT_SAMPLE_ROWS
+
+
+class PreprocessingConfig(BaseModel):
+    """Data cleaning and preprocessing settings."""
+
+    outlier_method: str = "iqr"
+    iqr_multiplier: float = DEFAULT_IQR_MULTIPLIER
+    max_null_threshold: float = DEFAULT_MAX_NULL_THRESHOLD
+    max_cardinality: int = DEFAULT_MAX_CARDINALITY
+    duplicate_keep: str = "first"
+
+    @field_validator("max_null_threshold")
+    @classmethod
+    def validate_null_threshold(cls, v: float) -> float:
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f"max_null_threshold must be in [0.0, 1.0], got {v}")
+        return v
+
+
+class FeatureEngineeringConfig(BaseModel):
+    """Feature engineering and selection settings."""
+
+    max_onehot_cardinality: int = DEFAULT_MAX_ONEHOT_CARDINALITY
+    variance_threshold: float = DEFAULT_VARIANCE_THRESHOLD
+    correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD
+    select_k_best: int = DEFAULT_SELECT_K_BEST
+    scaling_method: str = "standard"
+
+
+class SplittingConfig(BaseModel):
+    """Data splitting ratios and settings."""
+
+    train_ratio: float = DEFAULT_TRAIN_RATIO
+    val_ratio: float = DEFAULT_VAL_RATIO
+    test_ratio: float = DEFAULT_TEST_RATIO
+
+    @field_validator("test_ratio")
+    @classmethod
+    def validate_ratios_sum(cls, v: float, info) -> float:  # noqa: ANN001
+        train = info.data.get("train_ratio", DEFAULT_TRAIN_RATIO)
+        val = info.data.get("val_ratio", DEFAULT_VAL_RATIO)
+        total = train + val + v
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"Split ratios must sum to 1.0, got {total:.4f} "
+                f"(train={train}, val={val}, test={v})"
+            )
+        return v
+
+
+class TrainingConfig(BaseModel):
+    """Model training settings."""
+
+    n_jobs: int = DEFAULT_N_JOBS
+    cv_folds: int = DEFAULT_CV_FOLDS
+    timeout_per_model_seconds: int = DEFAULT_TIMEOUT_PER_MODEL
+
+
+class ErrorDetectionConfig(BaseModel):
+    """Thresholds for automated error / anomaly detection."""
+
+    min_classification_f1: float = DEFAULT_MIN_CLASSIFICATION_F1
+    min_regression_r2: float = DEFAULT_MIN_REGRESSION_R2
+    overfitting_threshold: float = DEFAULT_OVERFITTING_THRESHOLD
+    max_feature_count: int = DEFAULT_MAX_FEATURE_COUNT
+
+
+class ImprovementConfig(BaseModel):
+    """Improvement loop / hyperparameter tuning settings."""
+
+    tuning_iterations: int = DEFAULT_TUNING_ITERATIONS
+    early_stopping_rounds: int = DEFAULT_EARLY_STOPPING_ROUNDS
+    use_optuna: bool = False
+
+
+class LoggingConfig(BaseModel):
+    """Logging configuration."""
+
+    level: str = "INFO"
+    max_bytes: int = DEFAULT_LOG_MAX_BYTES
+    backup_count: int = DEFAULT_LOG_BACKUP_COUNT
+    json_format: bool = True
+
+
+# ── Root settings ───────────────────────────────────────────────────────────
+
+
+class Settings(BaseModel):
+    """Root configuration object aggregating all config sections.
+
+    Resolution order: YAML defaults → environment variable overrides.
+    """
+
+    pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    data_collection: DataCollectionConfig = Field(default_factory=DataCollectionConfig)
+    preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
+    feature_engineering: FeatureEngineeringConfig = Field(
+        default_factory=FeatureEngineeringConfig
+    )
+    splitting: SplittingConfig = Field(default_factory=SplittingConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
+    error_detection: ErrorDetectionConfig = Field(
+        default_factory=ErrorDetectionConfig
+    )
+    improvement: ImprovementConfig = Field(default_factory=ImprovementConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
+
+
+# ── Loading utilities ───────────────────────────────────────────────────────
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, preferring override values."""
+    merged = base.copy()
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _apply_env_overrides(data: dict) -> dict:
+    """Apply environment variable overrides to the config dict.
+
+    Convention: ``LLM_MODEL`` overrides ``data["llm"]["model"]``.
+    Only known top-level sections are scanned.
+    """
+    env_map = {
+        "LLM_MODEL": ("llm", "model"),
+        "LLM_TEMPERATURE": ("llm", "temperature"),
+        "LLM_MAX_TOKENS": ("llm", "max_tokens"),
+        "LOG_LEVEL": ("logging", "level"),
+        "RANDOM_SEED": ("pipeline", "random_seed"),
+        "MAX_RETRIES": ("pipeline", "max_retries"),
+        "ARTIFACT_DIR": ("pipeline", "artifact_dir"),
+        "REPORT_DIR": ("pipeline", "report_dir"),
+        "LOG_DIR": ("pipeline", "log_dir"),
+    }
+    for env_key, (section, field) in env_map.items():
+        env_val = os.environ.get(env_key)
+        if env_val is not None:
+            data.setdefault(section, {})[field] = env_val
+    return data
+
+
+def load_settings(
+    config_path: Optional[str | Path] = None,
+    overrides: Optional[dict] = None,
+) -> Settings:
+    """Load and validate pipeline settings.
+
+    Args:
+        config_path: Path to YAML config file. Defaults to ``configs/default.yaml``.
+        overrides: Programmatic overrides applied last.
+
+    Returns:
+        Fully validated ``Settings`` instance.
+
+    Raises:
+        core.exceptions.ConfigurationError: If the config file is missing or invalid.
+    """
+    from core.exceptions import ConfigurationError
+
+    if config_path is None:
+        config_path = Path(os.environ.get("CONFIG_PATH", "configs/default.yaml"))
+    else:
+        config_path = Path(config_path)
+
+    data: dict = {}
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as fh:
+                raw = yaml.safe_load(fh)
+                if isinstance(raw, dict):
+                    data = raw
+        except yaml.YAMLError as exc:
+            raise ConfigurationError(
+                f"Failed to parse config file {config_path}: {exc}"
+            ) from exc
+    else:
+        # Warn but don't fail — defaults are sane
+        import warnings
+
+        warnings.warn(
+            f"Config file not found at {config_path}, using built-in defaults.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    # Layer: env vars
+    data = _apply_env_overrides(data)
+
+    # Layer: programmatic overrides
+    if overrides:
+        data = _deep_merge(data, overrides)
+
+    try:
+        return Settings(**data)
+    except Exception as exc:
+        raise ConfigurationError(
+            f"Configuration validation failed: {exc}",
+            context={"raw_data": data},
+        ) from exc

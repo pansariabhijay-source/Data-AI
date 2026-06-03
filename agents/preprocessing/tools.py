@@ -1,0 +1,256 @@
+"""
+Preprocessing Tool — clean, impute, and prepare data for feature engineering.
+
+Handles: missing values, duplicates, outliers, dtype fixing, high-cardinality detection.
+"""
+
+from __future__ import annotations
+
+import json
+import traceback
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+
+from core.config import PreprocessingConfig, Settings
+from core.constants import ProblemType
+from core.exceptions import PreprocessingError
+from core.logging_config import get_logger, log_stage_timing
+from core.state import ErrorReport, PipelineState, PreprocessingSummary
+from core.utils import ensure_directory, get_memory_usage_mb, optimize_dataframe_memory
+from core.validation import compute_quality_score
+
+logger = get_logger("preprocessing")
+
+
+class PreprocessingService:
+    """Deterministic data cleaning and preprocessing logic."""
+
+    def __init__(self, config: PreprocessingConfig) -> None:
+        self._config = config
+
+    def remove_duplicates(self, df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+        before = len(df)
+        df = df.drop_duplicates(keep=self._config.duplicate_keep)
+        removed = before - len(df)
+        if removed > 0:
+            logger.info(f"Removed {removed} duplicate rows")
+        return df, removed
+
+    def handle_missing_values(self, df: pd.DataFrame, target: Optional[str] = None) -> tuple[pd.DataFrame, dict[str, str]]:
+        """Fill or drop missing values based on column type and null ratio."""
+        strategies: dict[str, str] = {}
+        cols_to_drop: list[str] = []
+
+        for col in df.columns:
+            if col == target:
+                # Drop rows with missing target
+                n_before = len(df)
+                df = df.dropna(subset=[col])
+                if len(df) < n_before:
+                    strategies[col] = f"dropped {n_before - len(df)} rows with null target"
+                continue
+
+            null_pct = df[col].isnull().mean()
+            if null_pct == 0:
+                continue
+
+            if null_pct > self._config.max_null_threshold:
+                cols_to_drop.append(col)
+                strategies[col] = f"dropped (>{self._config.max_null_threshold:.0%} null)"
+                continue
+
+            if pd.api.types.is_numeric_dtype(df[col]):
+                median_val = df[col].median()
+                df[col] = df[col].fillna(median_val)
+                strategies[col] = f"filled with median ({median_val:.4g})"
+            elif pd.api.types.is_bool_dtype(df[col]):
+                mode_val = df[col].mode().iloc[0] if not df[col].mode().empty else False
+                df[col] = df[col].fillna(mode_val)
+                strategies[col] = f"filled with mode ({mode_val})"
+            else:
+                mode_val = df[col].mode().iloc[0] if not df[col].mode().empty else "unknown"
+                df[col] = df[col].fillna(mode_val)
+                strategies[col] = f"filled with mode ({mode_val})"
+
+        if cols_to_drop:
+            df = df.drop(columns=cols_to_drop)
+            logger.info(f"Dropped {len(cols_to_drop)} high-null columns: {cols_to_drop}")
+
+        return df, strategies
+
+    def fix_dtypes(self, df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
+        """Attempt to infer and fix column dtypes."""
+        fixes: dict[str, str] = {}
+        for col in df.columns:
+            if df[col].dtype == object or str(df[col].dtype) in ("string", "str"):
+                # Try numeric conversion
+                numeric = pd.to_numeric(df[col], errors="coerce")
+                pct_numeric = numeric.notna().mean()
+                if pct_numeric > 0.8:
+                    df[col] = numeric
+                    fixes[col] = "converted to numeric"
+                    continue
+
+                # Try datetime
+                try:
+                    dt = pd.to_datetime(df[col], errors="coerce", infer_datetime_format=True)
+                    if dt.notna().mean() > 0.8:
+                        df[col] = dt
+                        fixes[col] = "converted to datetime"
+                        continue
+                except Exception:
+                    pass
+
+                # Try boolean
+                unique_lower = set(df[col].dropna().astype(str).str.lower().unique())
+                if unique_lower.issubset({"true", "false", "yes", "no", "0", "1"}):
+                    bool_map = {"true": True, "false": False, "yes": True, "no": False, "1": True, "0": False}
+                    df[col] = df[col].astype(str).str.lower().map(bool_map)
+                    fixes[col] = "converted to boolean"
+
+        return df, fixes
+
+    def handle_outliers(self, df: pd.DataFrame, target: Optional[str] = None) -> tuple[pd.DataFrame, dict[str, int]]:
+        """Winsorize outliers using IQR method on numeric columns."""
+        handled: dict[str, int] = {}
+        if self._config.outlier_method != "iqr":
+            return df, handled
+
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if target and target in numeric_cols:
+            numeric_cols.remove(target)
+
+        for col in numeric_cols:
+            q1 = df[col].quantile(0.25)
+            q3 = df[col].quantile(0.75)
+            iqr = q3 - q1
+            if iqr == 0:
+                continue
+            lower = q1 - self._config.iqr_multiplier * iqr
+            upper = q3 + self._config.iqr_multiplier * iqr
+            outlier_mask = (df[col] < lower) | (df[col] > upper)
+            count = int(outlier_mask.sum())
+            if count > 0:
+                df[col] = df[col].clip(lower=lower, upper=upper)
+                handled[col] = count
+
+        if handled:
+            total = sum(handled.values())
+            logger.info(f"Winsorized {total} outliers across {len(handled)} columns")
+        return df, handled
+
+    def detect_high_cardinality(self, df: pd.DataFrame) -> list[str]:
+        """Detect categorical columns with cardinality above threshold."""
+        high_card: list[str] = []
+        for col in df.select_dtypes(include=["object", "category", "str"]).columns:
+            nunique = df[col].nunique()
+            if nunique > self._config.max_cardinality:
+                high_card.append(col)
+        return high_card
+
+    @log_stage_timing("preprocessing")
+    def run(self, state: PipelineState, settings: Settings) -> PipelineState:
+        """Execute the full preprocessing stage."""
+        data_path = state.cleaned_data_path or state.raw_data_path
+        if not data_path:
+            raise PreprocessingError("No data path available")
+
+        df = pd.read_csv(data_path, low_memory=False)
+        rows_before = len(df)
+        cols_before = len(df.columns)
+
+        # Fix dtypes
+        df, dtype_fixes = self.fix_dtypes(df)
+
+        # Remove duplicates
+        df, dups_removed = self.remove_duplicates(df)
+
+        # Handle missing values
+        df, null_strategies = self.handle_missing_values(df, state.target_column)
+
+        # Handle outliers
+        df, outliers = self.handle_outliers(df, state.target_column)
+
+        # Detect high cardinality
+        high_card = self.detect_high_cardinality(df)
+
+        # Optimize memory
+        df = optimize_dataframe_memory(df)
+
+        # Quality score after cleaning
+        quality = compute_quality_score(df)
+
+        # Save cleaned data
+        artifact_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id)
+        cleaned_path = artifact_dir / "cleaned_data.csv"
+        df.to_csv(cleaned_path, index=False)
+
+        # Update state
+        cols_dropped = [c for c, s in null_strategies.items() if "dropped" in s and "rows" not in s]
+        state.cleaned_data_path = str(cleaned_path)
+        state.preprocessing_summary = PreprocessingSummary(
+            rows_before=rows_before, rows_after=len(df),
+            columns_before=cols_before, columns_after=len(df.columns),
+            duplicates_removed=dups_removed,
+            nulls_filled=null_strategies, outliers_handled=outliers,
+            dtypes_fixed=dtype_fixes,
+            high_cardinality_columns=high_card,
+            columns_dropped=cols_dropped, quality_score=quality,
+        )
+        state.mark_stage_end("preprocessing")
+        logger.info(f"Preprocessing complete: {rows_before}->{len(df)} rows, quality={quality:.4f}")
+        return state
+
+
+_service: Optional[PreprocessingService] = None
+_state: Optional[PipelineState] = None
+_settings: Optional[Settings] = None
+
+
+def init_preprocessing(state: PipelineState, settings: Settings) -> None:
+    global _service, _state, _settings
+    _service = PreprocessingService(settings.preprocessing)
+    _state = state
+    _settings = settings
+
+
+def preprocess_data(instruction: str) -> str:
+    """Clean and preprocess the dataset.
+
+    Handles missing values, duplicates, outliers (IQR winsorization),
+    dtype fixes, and high-cardinality detection.
+
+    Args:
+        instruction: Natural language description of preprocessing task.
+
+    Returns:
+        JSON summary of preprocessing results.
+    """
+    global _service, _state, _settings
+    if _service is None or _state is None or _settings is None:
+        return json.dumps({"error": "Preprocessing service not initialized"})
+    try:
+        _state.mark_stage_start("preprocessing")
+        _state = _service.run(_state, _settings)
+        s = _state.preprocessing_summary
+        result = {
+            "status": "success",
+            "rows": f"{s.rows_before}->{s.rows_after}" if s else "N/A",
+            "columns": f"{s.columns_before}->{s.columns_after}" if s else "N/A",
+            "duplicates_removed": s.duplicates_removed if s else 0,
+            "quality_score": s.quality_score if s else 0,
+        }
+        return json.dumps(result, default=str)
+    except Exception as e:
+        logger.exception("Preprocessing failed")
+        _state.add_error(ErrorReport(
+            severity="critical", stage="preprocessing",
+            error_type=type(e).__name__, root_cause=str(e),
+            traceback_str=traceback.format_exc(),
+            recommended_fix="Check data format and column types",
+            retryable=True,
+        ))
+        return json.dumps({"error": str(e)})

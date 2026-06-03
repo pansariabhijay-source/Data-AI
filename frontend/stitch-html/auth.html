@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Axiom AI | Authentication</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&amp;family=Inter:wght@400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            background: radial-gradient(circle at top left, #131b2e 0%, #0b1326 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        .mesh-gradient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background-color: #0b1326;
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(222, 47%, 11%, 1) 0, transparent 50%), 
+                radial-gradient(at 50% 0%, hsla(223, 39%, 15%, 1) 0, transparent 50%), 
+                radial-gradient(at 100% 0%, hsla(215, 25%, 27%, 1) 0, transparent 50%);
+        }
+        .glass-rim-light {
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+            border-left: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .active-glow:focus-within {
+            box-shadow: 0 0 20px rgba(255, 193, 116, 0.2);
+        }
+        .gold-gradient-btn {
+            background: linear-gradient(135deg, #ffc174 0%, #f59e0b 100%);
+            box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+        }
+        .gold-gradient-btn:hover {
+            box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
+            transform: translateY(-1px);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-low": "#131b2e",
+                      "surface-dim": "#0b1326",
+                      "on-tertiary-fixed-variant": "#2f2ebe",
+                      "on-secondary-fixed-variant": "#004395",
+                      "primary": "#ffc174",
+                      "secondary-container": "#0566d9",
+                      "surface-container": "#171f33",
+                      "error": "#ffb4ab",
+                      "on-primary-fixed-variant": "#653e00",
+                      "on-secondary-container": "#e6ecff",
+                      "on-primary-container": "#613b00",
+                      "surface-tint": "#ffb95f",
+                      "outline": "#a08e7a",
+                      "on-tertiary": "#1000a9",
+                      "background": "#0b1326",
+                      "surface-container-high": "#222a3d",
+                      "tertiary-fixed": "#e1e0ff",
+                      "error-container": "#93000a",
+                      "on-secondary-fixed": "#001a42",
+                      "primary-fixed": "#ffddb8",
+                      "on-tertiary-container": "#2b29bb",
+                      "inverse-surface": "#dae2fd",
+                      "on-surface": "#dae2fd",
+                      "primary-fixed-dim": "#ffb95f",
+                      "on-primary": "#472a00",
+                      "on-secondary": "#002e6a",
+                      "tertiary-container": "#a7a9ff",
+                      "outline-variant": "#534434",
+                      "surface-container-highest": "#2d3449",
+                      "surface-bright": "#31394d",
+                      "on-error-container": "#ffdad6",
+                      "surface": "#0b1326",
+                      "on-error": "#690005",
+                      "on-surface-variant": "#d8c3ad",
+                      "primary-container": "#f59e0b",
+                      "tertiary-fixed-dim": "#c0c1ff",
+                      "secondary": "#adc6ff",
+                      "secondary-fixed-dim": "#adc6ff",
+                      "inverse-primary": "#855300",
+                      "secondary-fixed": "#d8e2ff",
+                      "surface-container-lowest": "#060e20",
+                      "inverse-on-surface": "#283044",
+                      "surface-variant": "#2d3449",
+                      "on-tertiary-fixed": "#07006c",
+                      "tertiary": "#c7c8ff",
+                      "on-background": "#dae2fd",
+                      "on-primary-fixed": "#2a1700"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-desktop": "48px",
+                      "margin-mobile": "16px",
+                      "gutter": "24px",
+                      "unit": "4px",
+                      "container-max": "1440px"
+              },
+              "fontFamily": {
+                      "display-lg": ["Outfit"],
+                      "body-sm": ["Inter"],
+                      "label-caps": ["Inter"],
+                      "body-md": ["Inter"],
+                      "headline-md": ["Outfit"],
+                      "display-lg-mobile": ["Outfit"]
+              },
+              "fontSize": {
+                      "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                      "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                      "display-lg-mobile": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+              }
+            },
+          },
+        }
+      </script>
+</head>
+<body class="bg-surface-dim text-on-surface selection:bg-primary/30 selection:text-primary">
+<!-- Background Mesh Layer -->
+<div class="mesh-gradient-bg"></div>
+<main class="relative z-10 min-h-screen flex flex-col items-center justify-center p-margin-mobile md:p-margin-desktop">
+<!-- Branding Header -->
+<div class="mb-12 flex flex-col items-center gap-2">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-[40px]" data-icon="token" style="font-variation-settings: 'FILL' 1;">token</span>
+<h1 class="font-display-lg text-display-lg-mobile md:text-display-lg text-primary tracking-tight">Axiom</h1>
+</div>
+<p class="font-body-md text-on-surface-variant/80 max-w-xs text-center">Step into the core of enterprise intelligence.</p>
+</div>
+<!-- Glass Auth Container -->
+<div class="w-full max-w-lg bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden glass-rim-light shadow-2xl">
+<div class="p-8 md:p-12">
+<div class="flex flex-col gap-8">
+<!-- Tab Selector (Simple Mock) -->
+<div class="flex border-b border-white/5">
+<button class="flex-1 pb-4 font-label-caps text-primary border-b-2 border-primary transition-all duration-300">SIGN IN</button>
+<button class="flex-1 pb-4 font-label-caps text-on-surface-variant/50 hover:text-on-surface-variant transition-all duration-300">CREATE ACCOUNT</button>
+</div>
+<!-- Social Login Options -->
+<div class="grid grid-cols-2 gap-4">
+<button class="flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300 active:scale-95 group">
+<img alt="Google" class="w-5 h-5 opacity-80 group-hover:opacity-100" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCfSm1lPbO4zDdBscUqgVrPuVmdsuFsqmTO_BmWYK23wbLBvSLaRf91f9X6Ob46yTlGiERUmYGSzX7P6bsL7uaIKP9VWFfnrVumgcMKbEr-79CQVLtTQD7YFmN3CmZvF_lZq_gpiJ6jMJ3kMCoWuhoZZ-xYX-9ho21pIGL8aEmVplx001tnOpXJjp_RVJQHusxTSiaGGH50glbeOQJOOQTnSWC1O9TA7BaiWlErviHZyp4Pe3uwZKJ8pQDeCowPzR9VOduZeHge1I4"/>
+<span class="font-label-caps text-on-surface">Google</span>
+</button>
+<button class="flex items-center justify-center gap-2 py-3 px-4 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300 active:scale-95 group">
+<span class="material-symbols-outlined text-on-surface group-hover:text-primary transition-colors" data-icon="terminal" style="font-variation-settings: 'FILL' 1;">terminal</span>
+<span class="font-label-caps text-on-surface">SSO</span>
+</button>
+</div>
+<div class="relative flex items-center gap-4">
+<div class="flex-grow h-px bg-white/5"></div>
+<span class="font-label-caps text-on-surface-variant/40">OR CONTINUE WITH EMAIL</span>
+<div class="flex-grow h-px bg-white/5"></div>
+</div>
+<!-- Traditional Form -->
+<form class="flex flex-col gap-6" onsubmit="return false;">
+<div class="flex flex-col gap-2">
+<label class="font-label-caps text-on-surface-variant/70 ml-1">Work Email</label>
+<div class="relative active-glow rounded-lg">
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-on-surface-variant/50 text-[20px]" data-icon="alternate_email">alternate_email</span>
+</div>
+<input class="w-full bg-black/20 border-0 border-b-2 border-white/10 focus:ring-0 focus:border-primary py-4 pl-12 pr-4 rounded-t-lg font-body-md text-on-surface placeholder:text-on-surface-variant/30 transition-all" placeholder="name@company.ai" type="email"/>
+</div>
+</div>
+<div class="flex flex-col gap-2">
+<div class="flex justify-between items-center ml-1">
+<label class="font-label-caps text-on-surface-variant/70">Password</label>
+<a class="font-label-caps text-primary hover:text-primary-fixed transition-colors" href="#">Forgot?</a>
+</div>
+<div class="relative active-glow rounded-lg">
+<div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-on-surface-variant/50 text-[20px]" data-icon="lock">lock</span>
+</div>
+<input class="w-full bg-black/20 border-0 border-b-2 border-white/10 focus:ring-0 focus:border-primary py-4 pl-12 pr-12 rounded-t-lg font-body-md text-on-surface placeholder:text-on-surface-variant/30 transition-all" placeholder="••••••••" type="password"/>
+<button class="absolute inset-y-0 right-0 pr-4 flex items-center text-on-surface-variant/50 hover:text-primary" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<div class="flex items-center gap-3 py-2">
+<input class="w-5 h-5 rounded bg-black/20 border-white/10 text-primary focus:ring-primary focus:ring-offset-background cursor-pointer" id="remember" type="checkbox"/>
+<label class="font-body-sm text-on-surface-variant/70 cursor-pointer select-none" for="remember">Remember this session for 30 days</label>
+</div>
+<button class="gold-gradient-btn w-full py-4 rounded-lg font-headline-md text-on-primary flex items-center justify-center gap-3 transition-all active:scale-95 group" type="submit">
+<span class="font-bold">Enter Axiom</span>
+<span class="material-symbols-outlined transition-transform group-hover:translate-x-1" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</form>
+</div>
+</div>
+<!-- Card Footer/Upsell -->
+<div class="bg-primary/5 p-6 border-t border-white/5 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" data-icon="auto_awesome" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+<span class="font-body-sm text-on-surface-variant">Looking for Enterprise Core?</span>
+</div>
+<button class="font-label-caps text-primary hover:underline">Contact Sales</button>
+</div>
+</div>
+<!-- System Status/Footer Information -->
+<footer class="mt-12 w-full max-w-lg flex justify-between items-center opacity-40">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary shadow-[0_0_8px_#ffc174]"></span>
+<span class="font-label-caps text-[10px]">ALL SYSTEMS OPERATIONAL</span>
+</div>
+<div class="flex gap-6">
+<a class="font-label-caps text-[10px] hover:text-primary transition-colors" href="#">Privacy</a>
+<a class="font-label-caps text-[10px] hover:text-primary transition-colors" href="#">Security</a>
+<span class="font-label-caps text-[10px]">© 2024 Axiom AI</span>
+</div>
+</footer>
+<!-- Decorative Elements -->
+<div class="fixed top-20 right-[-10%] w-[400px] h-[400px] bg-primary/5 rounded-full blur-[120px] pointer-events-none"></div>
+<div class="fixed bottom-0 left-[-5%] w-[300px] h-[300px] bg-secondary-container/10 rounded-full blur-[100px] pointer-events-none"></div>
+</main>
+</body></html>

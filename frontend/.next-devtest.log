@@ -1,0 +1,8 @@
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://localhost:3399
+- Network:       http://192.168.1.93:3399
+✓ Ready in 605ms
+
+ GET / 200 in 770ms (next.js: 130ms, proxy.ts: 268ms, application-code: 372ms)
+ GET / 200 in 55ms (next.js: 5ms, proxy.ts: 7ms, application-code: 44ms)
+○ Compiling /auth ...

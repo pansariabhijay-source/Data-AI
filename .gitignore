@@ -1,0 +1,50 @@
+# ── Secrets / environment ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+get-pip.py
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Runtime data / artifacts (regenerated per run) ───────────────────────────
+data/axiom.db
+data/axiom.db-wal
+data/axiom.db-shm
+data/uploads/
+data/source.db
+artifacts/
+reports/
+logs/
+
+# ── Frontend ─────────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+frontend/next-env.d.ts
+
+# ── Editors / OS ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ── Stitch scratch ───────────────────────────────────────────────────────────
+.stitch-screens/

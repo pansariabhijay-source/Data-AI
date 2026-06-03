@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        body {
+            background: radial-gradient(circle at top right, #171f33, #0b1326);
+            min-height: 100vh;
+            color: #dae2fd;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .glass-panel-hover:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .gold-glow {
+            box-shadow: 0 0 15px rgba(255, 193, 116, 0.3);
+        }
+        .rim-light {
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error-container": "#ffdad6",
+                        "tertiary-fixed-dim": "#c0c1ff",
+                        "on-surface": "#dae2fd",
+                        "on-background": "#dae2fd",
+                        "surface-container-low": "#131b2e",
+                        "outline-variant": "#534434",
+                        "outline": "#a08e7a",
+                        "primary-container": "#f59e0b",
+                        "on-primary-fixed-variant": "#653e00",
+                        "inverse-on-surface": "#283044",
+                        "on-primary": "#472a00",
+                        "on-primary-fixed": "#2a1700",
+                        "on-error": "#690005",
+                        "surface-dim": "#0b1326",
+                        "secondary": "#adc6ff",
+                        "tertiary-container": "#a7a9ff",
+                        "secondary-container": "#0566d9",
+                        "error-container": "#93000a",
+                        "error": "#ffb4ab",
+                        "surface-container-lowest": "#060e20",
+                        "surface-tint": "#ffb95f",
+                        "primary": "#ffc174",
+                        "inverse-primary": "#855300",
+                        "on-secondary-fixed": "#001a42",
+                        "primary-fixed-dim": "#ffb95f",
+                        "on-tertiary": "#1000a9",
+                        "on-secondary": "#002e6a",
+                        "surface-bright": "#31394d",
+                        "on-tertiary-fixed": "#07006c",
+                        "on-tertiary-fixed-variant": "#2f2ebe",
+                        "surface-container": "#171f33",
+                        "primary-fixed": "#ffddb8",
+                        "on-secondary-container": "#e6ecff",
+                        "surface-container-high": "#222a3d",
+                        "on-surface-variant": "#d8c3ad",
+                        "surface-variant": "#2d3449",
+                        "on-tertiary-container": "#2b29bb",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "secondary-fixed": "#d8e2ff",
+                        "tertiary-fixed": "#e1e0ff",
+                        "on-primary-container": "#613b00",
+                        "inverse-surface": "#dae2fd",
+                        "background": "#0b1326",
+                        "surface-container-highest": "#2d3449",
+                        "surface": "#0b1326",
+                        "on-secondary-fixed-variant": "#004395",
+                        "tertiary": "#c7c8ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "4px",
+                        "margin-mobile": "16px",
+                        "container-max": "1440px",
+                        "gutter": "24px",
+                        "margin-desktop": "48px"
+                    },
+                    "fontFamily": {
+                        "display-lg-mobile": ["Outfit"],
+                        "headline-md": ["Outfit"],
+                        "body-md": ["Inter"],
+                        "display-lg": ["Outfit"],
+                        "body-sm": ["Inter"],
+                        "label-caps": ["Inter"]
+                    },
+                    "fontSize": {
+                        "display-lg-mobile": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="font-body-md text-body-md overflow-x-hidden">
+<div class="flex min-h-screen">
+<!-- SideNavBar -->
+<aside class="h-screen w-64 left-0 sticky flex flex-col py-margin-desktop bg-surface-dim/80 backdrop-blur-2xl border-r border-white/10 shadow-[0px_4px_20px_rgba(0,0,0,0.5)] z-50">
+<div class="px-6 mb-10">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-primary-container flex items-center justify-center shadow-lg gold-glow">
+<span class="material-symbols-outlined text-on-primary-fixed" style="font-variation-settings: 'FILL' 1;">1k</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md text-primary leading-tight">Axiom Command</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant opacity-60">Enterprise ML v2.4</p>
+</div>
+</div>
+</div>
+<nav class="flex-1">
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors cursor-pointer group">
+<span class="material-symbols-outlined group-hover:text-primary">dashboard</span>
+<span class="font-label-caps text-label-caps">Dashboard</span>
+</div>
+<div class="text-primary bg-white/10 border-r-4 border-primary px-4 py-3 flex items-center gap-3 cursor-default">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">account_tree</span>
+<span class="font-label-caps text-label-caps">Workflows</span>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors cursor-pointer group">
+<span class="material-symbols-outlined group-hover:text-primary">memory</span>
+<span class="font-label-caps text-label-caps">Agent Nodes</span>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors cursor-pointer group">
+<span class="material-symbols-outlined group-hover:text-primary">storage</span>
+<span class="font-label-caps text-label-caps">Data Vault</span>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors cursor-pointer group">
+<span class="material-symbols-outlined group-hover:text-primary">security</span>
+<span class="font-label-caps text-label-caps">Security</span>
+</div>
+</nav>
+<div class="px-4 mt-auto space-y-2">
+<div class="p-4 rounded-xl bg-gradient-to-br from-indigo-900/40 to-violet-900/40 border border-white/10 relative overflow-hidden">
+<span class="material-symbols-outlined absolute -right-2 -top-2 text-primary/20 text-4xl">lock</span>
+<p class="font-label-caps text-label-caps text-primary mb-2">Upgrade to Pro</p>
+<p class="text-[10px] text-on-surface-variant leading-relaxed">Unlock advanced orchestration &amp; 100TB vault storage.</p>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors cursor-pointer group">
+<span class="material-symbols-outlined group-hover:text-primary">help</span>
+<span class="font-label-caps text-label-caps">Help</span>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-white/5 hover:text-on-surface transition-colors cursor-pointer group">
+<span class="material-symbols-outlined group-hover:text-primary">terminal</span>
+<span class="font-label-caps text-label-caps">Logs</span>
+</div>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="flex-1 flex flex-col min-w-0">
+<!-- TopNavBar -->
+<header class="w-full top-0 sticky z-40 flex justify-between items-center px-gutter py-4 w-full bg-white/5 backdrop-blur-xl border-b border-white/10 shadow-2xl">
+<div class="flex items-center gap-8">
+<span class="font-display-lg text-[24px] font-bold bg-gradient-to-r from-primary to-primary-fixed bg-clip-text text-transparent">AXIOM</span>
+<div class="hidden md:flex items-center gap-6">
+<a class="font-body-md text-body-md text-on-surface-variant font-medium hover:text-primary transition-all" href="#">Models</a>
+<a class="font-body-md text-body-md text-on-surface-variant font-medium hover:text-primary transition-all" href="#">API</a>
+<a class="font-body-md text-body-md text-on-surface-variant font-medium hover:text-primary transition-all" href="#">Documentation</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 rounded-full hover:bg-white/10 text-on-surface-variant transition-all">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 rounded-full hover:bg-white/10 text-on-surface-variant transition-all">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-primary/30">
+<img alt="User profile" class="w-full h-full object-cover" data-alt="A professional headshot of a software engineer in a modern tech environment. The person is wearing a dark navy blazer over a grey t-shirt, looking confidently at the camera. The background is a slightly blurred high-tech office with cool blue and amber ambient lighting, matching the premium enterprise AI aesthetic of the Axiom platform." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAG4NcmaB3aL5N9fSYHvg_PYwLOovDPjCtMhrNGNSizAdi4dAJd-fuafUfxqAbyb-ensfi-ZPSTaek6sJiplcOFN-hj5jZy95-Olk23hmChNe9C5njVPm4DZ63F9FaKzjdeOJ-Td8-ljETipTssSw35samDSYHJNL64v9stxZcQ-77rSEuzZWRa32RVWVK5-zDkm-JaA2K_eWJd7x5GpmGwEIQQIN7yDAQJyLhP6lju7RKQoo81Z1D8fjcyCOoYg9z76dVWLTfWMjw"/>
+</div>
+</div>
+</header>
+<div class="p-8 space-y-8 max-w-[1440px] mx-auto w-full">
+<!-- Header & Promotion Control -->
+<section class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+<div>
+<div class="flex items-center gap-2 text-primary mb-1">
+<span class="material-symbols-outlined text-sm">auto_awesome</span>
+<span class="font-label-caps text-label-caps uppercase tracking-widest">Model Registry</span>
+</div>
+<h2 class="font-display-lg text-display-lg-mobile md:text-display-lg text-on-surface">Neural Nexus v2</h2>
+</div>
+<div class="flex items-center gap-4">
+<button class="glass-panel px-6 py-3 rounded-xl font-label-caps text-label-caps flex items-center gap-2 hover:bg-white/10 transition-all border border-white/10">
+<span class="material-symbols-outlined">history</span>
+                            Rollback
+                        </button>
+<button class="bg-gradient-to-r from-primary to-primary-container text-on-primary-fixed font-label-caps text-label-caps px-8 py-3 rounded-xl gold-glow hover:brightness-110 active:scale-95 transition-all flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">rocket_launch</span>
+                            Promote to Production
+                        </button>
+</div>
+</section>
+<!-- Bento Grid Content -->
+<div class="grid grid-cols-12 gap-6">
+<!-- Deployment Pipeline Visualization -->
+<div class="col-span-12 glass-panel p-6 rounded-2xl relative overflow-hidden">
+<div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent"></div>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-8 uppercase tracking-tighter">Deployment Pipeline</h3>
+<div class="flex justify-between items-center relative px-12">
+<!-- Connection Line -->
+<div class="absolute top-1/2 left-0 w-full h-[2px] bg-white/10 -translate-y-1/2 z-0">
+<div class="h-full bg-gradient-to-r from-primary via-primary to-white/10 w-[66%]"></div>
+</div>
+<!-- Node 1: Registry -->
+<div class="relative z-10 flex flex-col items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center gold-glow ring-4 ring-surface-dim">
+<span class="material-symbols-outlined text-on-primary-fixed">inventory_2</span>
+</div>
+<div class="text-center">
+<p class="font-label-caps text-label-caps text-on-surface font-bold">Registry</p>
+<p class="text-[10px] text-on-surface-variant">v1.0.6 (Latest)</p>
+</div>
+</div>
+<!-- Node 2: Canary -->
+<div class="relative z-10 flex flex-col items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center gold-glow ring-4 ring-surface-dim">
+<span class="material-symbols-outlined text-on-primary-fixed">science</span>
+</div>
+<div class="text-center">
+<p class="font-label-caps text-label-caps text-on-surface font-bold">Canary</p>
+<p class="text-[10px] text-on-surface-variant">v1.0.5 (Active)</p>
+</div>
+</div>
+<!-- Node 3: Production -->
+<div class="relative z-10 flex flex-col items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center ring-4 ring-surface-dim border border-white/20">
+<span class="material-symbols-outlined text-on-surface-variant">check_circle</span>
+</div>
+<div class="text-center">
+<p class="font-label-caps text-label-caps text-on-surface-variant">Production</p>
+<p class="text-[10px] text-on-surface-variant">v1.0.4 (Live)</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Model Inventory -->
+<div class="col-span-12 lg:col-span-8 space-y-6">
+<div class="glass-panel rounded-2xl overflow-hidden">
+<div class="p-6 border-b border-white/10 flex justify-between items-center">
+<h3 class="font-headline-md text-[18px] text-on-surface">Model Inventory</h3>
+<div class="flex gap-2">
+<div class="px-3 py-1 bg-white/5 rounded-lg border border-white/10 text-xs text-on-surface-variant">Total: 24 Models</div>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead>
+<tr class="bg-white/5 text-on-surface-variant font-label-caps text-[10px] uppercase tracking-widest">
+<th class="px-6 py-4">Model Name</th>
+<th class="px-6 py-4">Version</th>
+<th class="px-6 py-4">Framework</th>
+<th class="px-6 py-4">Status</th>
+<th class="px-6 py-4">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-white/5">
+<tr class="glass-panel-hover transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-secondary/20 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-lg">psychology</span>
+</div>
+<span class="font-medium">nexus-transformer-7b</span>
+</div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">v1.0.4</td>
+<td class="px-6 py-4">
+<span class="px-2 py-1 bg-orange-500/20 text-orange-400 text-[10px] font-bold rounded uppercase">PyTorch</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+<span class="text-green-500 text-sm">Production</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="glass-panel-hover transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-secondary/20 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-lg">analytics</span>
+</div>
+<span class="font-medium">churn-predictor-pro</span>
+</div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">v2.1.0</td>
+<td class="px-6 py-4">
+<span class="px-2 py-1 bg-blue-500/20 text-blue-400 text-[10px] font-bold rounded uppercase">TensorFlow</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-amber-500"></div>
+<span class="text-amber-500 text-sm">Staging</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</td>
+</tr>
+<tr class="glass-panel-hover transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded bg-secondary/20 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-lg">language</span>
+</div>
+<span class="font-medium">nlp-semantic-layer</span>
+</div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">v0.9.8</td>
+<td class="px-6 py-4">
+<span class="px-2 py-1 bg-orange-500/20 text-orange-400 text-[10px] font-bold rounded uppercase">PyTorch</span>
+</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-indigo-500"></div>
+<span class="text-indigo-500 text-sm">Shadow</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">more_horiz</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Inference Metrics Panel -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<div class="glass-panel p-5 rounded-2xl space-y-4">
+<div class="flex justify-between items-start">
+<p class="font-label-caps text-label-caps text-on-surface-variant">Latency</p>
+<span class="text-green-500 text-[10px] font-bold">-4.2%</span>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="text-2xl font-bold text-on-surface">42ms</p>
+<p class="text-[10px] text-on-surface-variant opacity-50">p99</p>
+</div>
+<div class="h-12 flex items-end gap-1">
+<div class="flex-1 bg-primary/20 h-[40%] rounded-sm"></div>
+<div class="flex-1 bg-primary/20 h-[60%] rounded-sm"></div>
+<div class="flex-1 bg-primary/20 h-[55%] rounded-sm"></div>
+<div class="flex-1 bg-primary/20 h-[80%] rounded-sm"></div>
+<div class="flex-1 bg-primary h-[35%] rounded-sm gold-glow"></div>
+<div class="flex-1 bg-primary/20 h-[45%] rounded-sm"></div>
+<div class="flex-1 bg-primary/20 h-[50%] rounded-sm"></div>
+</div>
+</div>
+<div class="glass-panel p-5 rounded-2xl space-y-4">
+<div class="flex justify-between items-start">
+<p class="font-label-caps text-label-caps text-on-surface-variant">Throughput</p>
+<span class="text-primary text-[10px] font-bold">+12%</span>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="text-2xl font-bold text-on-surface">1.2k</p>
+<p class="text-[10px] text-on-surface-variant opacity-50">req/s</p>
+</div>
+<div class="h-12 flex items-end gap-1">
+<div class="flex-1 bg-secondary/20 h-[70%] rounded-sm"></div>
+<div class="flex-1 bg-secondary/20 h-[65%] rounded-sm"></div>
+<div class="flex-1 bg-secondary/20 h-[75%] rounded-sm"></div>
+<div class="flex-1 bg-secondary/20 h-[85%] rounded-sm"></div>
+<div class="flex-1 bg-secondary h-[90%] rounded-sm"></div>
+<div class="flex-1 bg-secondary/20 h-[80%] rounded-sm"></div>
+<div class="flex-1 bg-secondary/20 h-[75%] rounded-sm"></div>
+</div>
+</div>
+<div class="glass-panel p-5 rounded-2xl space-y-4">
+<div class="flex justify-between items-start">
+<p class="font-label-caps text-label-caps text-on-surface-variant">Error Rate</p>
+<span class="text-error text-[10px] font-bold">Stable</span>
+</div>
+<div class="flex items-baseline gap-2">
+<p class="text-2xl font-bold text-on-surface">0.02%</p>
+<p class="text-[10px] text-on-surface-variant opacity-50">global</p>
+</div>
+<div class="h-12 flex items-end gap-1">
+<div class="flex-1 bg-error/10 h-[10%] rounded-sm"></div>
+<div class="flex-1 bg-error/10 h-[15%] rounded-sm"></div>
+<div class="flex-1 bg-error/10 h-[10%] rounded-sm"></div>
+<div class="flex-1 bg-error h-[12%] rounded-sm"></div>
+<div class="flex-1 bg-error/10 h-[10%] rounded-sm"></div>
+<div class="flex-1 bg-error/10 h-[15%] rounded-sm"></div>
+<div class="flex-1 bg-error/10 h-[10%] rounded-sm"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Version History Sidebar -->
+<div class="col-span-12 lg:col-span-4 space-y-6">
+<div class="glass-panel rounded-2xl p-6 h-full flex flex-col">
+<h3 class="font-headline-md text-[18px] text-on-surface mb-6 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">history</span>
+                                Version History
+                            </h3>
+<div class="space-y-8 flex-1">
+<!-- Log Item -->
+<div class="relative pl-6 border-l border-white/10 space-y-2 pb-2">
+<div class="absolute -left-[5px] top-0 w-2 h-2 rounded-full bg-primary gold-glow"></div>
+<div class="flex justify-between items-center">
+<p class="font-label-caps text-label-caps text-primary">v1.0.6 (Registry)</p>
+<p class="text-[10px] text-on-surface-variant">2h ago</p>
+</div>
+<p class="text-sm text-on-surface leading-snug">Retrained on new Q3 dataset with improved attention mechanisms.</p>
+<div class="flex gap-2">
+<span class="text-[10px] px-2 py-0.5 rounded bg-white/5 text-on-surface-variant">#model-training</span>
+</div>
+</div>
+<!-- Log Item -->
+<div class="relative pl-6 border-l border-white/10 space-y-2 pb-2">
+<div class="absolute -left-[5px] top-0 w-2 h-2 rounded-full bg-white/30"></div>
+<div class="flex justify-between items-center">
+<p class="font-label-caps text-label-caps text-on-surface">v1.0.5 (Canary)</p>
+<p class="text-[10px] text-on-surface-variant">1d ago</p>
+</div>
+<p class="text-sm text-on-surface-variant leading-snug">Canary deployment successful. Latency metrics within tolerance levels.</p>
+<div class="flex gap-2">
+<span class="text-[10px] px-2 py-0.5 rounded bg-white/5 text-on-surface-variant">#canary</span>
+<span class="text-[10px] px-2 py-0.5 rounded bg-white/5 text-on-surface-variant">#verified</span>
+</div>
+</div>
+<!-- Log Item -->
+<div class="relative pl-6 border-l border-white/10 space-y-2">
+<div class="absolute -left-[5px] top-0 w-2 h-2 rounded-full bg-green-500"></div>
+<div class="flex justify-between items-center">
+<p class="font-label-caps text-label-caps text-green-500">v1.0.4 (Live)</p>
+<p class="text-[10px] text-on-surface-variant">3d ago</p>
+</div>
+<p class="text-sm text-on-surface-variant leading-snug">Promoted to Production by system-admin.</p>
+<div class="flex gap-2">
+<span class="text-[10px] px-2 py-0.5 rounded bg-white/5 text-on-surface-variant">#production</span>
+</div>
+</div>
+</div>
+<button class="w-full mt-6 py-3 border border-white/10 rounded-xl text-on-surface-variant font-label-caps text-label-caps hover:bg-white/5 transition-all">
+                                View Full Changelog
+                            </button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>
