@@ -1,6 +1,5 @@
-# Axiom — Autonomous Data Scientist
+# Axiom - Autonomous Data Scientist
 
-![Axiom Logo](https://img.shields.io/badge/Axiom-Autonomous%20AI-blue?style=for-the-badge)
 ![Python Version](https://img.shields.io/badge/Python-3.11%2B-blue?style=flat-square)
 ![Next.js Version](https://img.shields.io/badge/Next.js-14-black?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
