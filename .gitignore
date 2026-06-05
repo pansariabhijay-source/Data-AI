@@ -48,3 +48,6 @@ Thumbs.db
 
 # ── Stitch scratch ───────────────────────────────────────────────────────────
 .stitch-screens/
+
+# Benchmark outputs
+bench_*.json

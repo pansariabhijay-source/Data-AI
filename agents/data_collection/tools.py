@@ -97,20 +97,52 @@ class DataCollectionService:
         return metadata
 
     def detect_problem_type(self, df: pd.DataFrame, target: Optional[str] = None) -> ProblemType:
-        """Heuristic-based problem type detection."""
+        """Heuristic-based problem type detection.
+
+        Robust to numeric targets stored as strings (e.g. a price/volume column
+        dirtied by a junk header row) by attempting numeric coercion first. A
+        numeric target is only treated as classification when it has few distinct
+        values — a high-cardinality continuous target (479-class "Volume") is
+        regression, not a 479-way classification.
+        """
+        from core.constants import (
+            DEFAULT_MAX_CLASSIFICATION_UNIQUE,
+            DEFAULT_MAX_INT_CLASSIFICATION_UNIQUE,
+            DEFAULT_NUMERIC_COERCE_FRACTION,
+        )
+
         if target is None or target not in df.columns:
             logger.info("No target column — defaulting to clustering")
             return ProblemType.CLUSTERING
 
-        col = df[target]
-        if pd.api.types.is_numeric_dtype(col):
-            n_unique = col.nunique()
-            ratio = n_unique / max(len(df), 1)
-            if n_unique <= 20 or ratio < 0.05:
-                return ProblemType.CLASSIFICATION
-            return ProblemType.REGRESSION
-        else:
+        col = df[target].dropna()
+        if len(col) == 0:
             return ProblemType.CLASSIFICATION
+
+        numeric = col
+        if not pd.api.types.is_numeric_dtype(col):
+            # A column dirtied by stray text (junk rows, "N/A") is still numeric
+            # if the overwhelming majority of values parse as numbers.
+            coerced = pd.to_numeric(col, errors="coerce")
+            if coerced.notna().mean() >= DEFAULT_NUMERIC_COERCE_FRACTION:
+                numeric = coerced.dropna()
+            else:
+                return ProblemType.CLASSIFICATION  # genuinely categorical / text
+
+        n_unique = int(numeric.nunique())
+        if n_unique <= 2:
+            return ProblemType.CLASSIFICATION
+        if n_unique <= DEFAULT_MAX_CLASSIFICATION_UNIQUE:
+            return ProblemType.CLASSIFICATION
+
+        # Integer-coded targets with a modest number of levels relative to the row
+        # count are still discrete classes; everything else is regression.
+        values = numeric.to_numpy(dtype=float)
+        is_integer_like = bool(np.all(np.isfinite(values)) and np.all(np.equal(np.mod(values, 1), 0)))
+        ratio = n_unique / max(len(numeric), 1)
+        if is_integer_like and n_unique <= DEFAULT_MAX_INT_CLASSIFICATION_UNIQUE and ratio < 0.05:
+            return ProblemType.CLASSIFICATION
+        return ProblemType.REGRESSION
 
     @log_stage_timing("data_collection")
     def run(self, state: PipelineState, settings: Settings) -> PipelineState:

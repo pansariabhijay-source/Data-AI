@@ -76,23 +76,70 @@ def compute_quality_score(df: pd.DataFrame) -> float:
 
 
 def detect_target_leakage(
-    df: pd.DataFrame, target: str, threshold: float = 0.95
+    df: pd.DataFrame, target: str, threshold: float = 0.95, auc_threshold: float = 0.999
 ) -> list[str]:
-    """Detect features with suspiciously high correlation to target (potential leakage)."""
+    """Detect features that almost perfectly determine the target (potential leakage).
+
+    Two complementary, high-precision signals so the check is robust to the target's
+    dtype (the old correlation-only check silently did nothing for a string target):
+
+    * **Regression / numeric target** — absolute Pearson correlation ``>= threshold``.
+    * **Binary classification target** — single-feature ROC-AUC ``>= auc_threshold``.
+      Correlation misses thresholded leakage (e.g. ``RainTomorrow`` derived from a
+      ``RISK_MM`` rainfall column has only ~0.69 corr but a perfect 1.0 AUC), whereas
+      a feature that ranks the target perfectly on its own is leakage by definition.
+
+    Thresholds are deliberately near-1 to avoid stripping legitimately strong
+    predictors. ID-like columns are left to the feature-engineering ID guard.
+    """
     leaked: list[str] = []
     if target not in df.columns:
         return leaked
-    numeric_df = df.select_dtypes(include=[np.number])
-    if target not in numeric_df.columns:
+
+    y = df[target]
+    target_is_numeric = pd.api.types.is_numeric_dtype(y)
+    n_unique_target = int(y.nunique(dropna=True))
+
+    # Treat a numeric target with many distinct values as a regression target.
+    if target_is_numeric and n_unique_target > 20:
+        numeric_df = df.select_dtypes(include=[np.number])
+        for col in numeric_df.columns:
+            if col == target:
+                continue
+            try:
+                corr = abs(numeric_df[col].corr(numeric_df[target]))
+                if corr >= threshold:
+                    leaked.append(col)
+                    logger.warning(f"Potential leakage: '{col}' has {corr:.3f} correlation with target")
+            except Exception:
+                continue
         return leaked
-    for col in numeric_df.columns:
+
+    # Classification target. Only the binary case has a clean single-feature AUC test.
+    if n_unique_target != 2:
+        return leaked
+    try:
+        from sklearn.metrics import roc_auc_score
+    except Exception:
+        return leaked
+
+    y_enc = pd.factorize(y)[0]  # 0/1 encoding of the two classes
+    for col in df.columns:
         if col == target:
             continue
+        feat = pd.to_numeric(df[col], errors="coerce")
+        mask = feat.notna() & (y_enc >= 0)
+        if mask.sum() < 10:
+            continue
+        yv = y_enc[mask.to_numpy()]
+        if len(np.unique(yv)) < 2:
+            continue
         try:
-            corr = abs(numeric_df[col].corr(numeric_df[target]))
-            if corr >= threshold:
+            auc = roc_auc_score(yv, feat[mask])
+            auc = max(auc, 1.0 - auc)  # direction-agnostic ranking power
+            if auc >= auc_threshold:
                 leaked.append(col)
-                logger.warning(f"Potential leakage: '{col}' has {corr:.3f} correlation with target")
+                logger.warning(f"Potential leakage: '{col}' has single-feature AUC {auc:.4f} vs target")
         except Exception:
             continue
     return leaked

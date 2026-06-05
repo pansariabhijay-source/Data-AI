@@ -115,6 +115,16 @@ DEFAULT_SELECT_K_BEST: int = 20
 # transaction_id) and are dropped rather than label-encoded into pure noise.
 DEFAULT_ID_UNIQUENESS_RATIO: float = 0.5
 
+# Problem-type detection — a numeric target with more distinct values than this
+# is treated as regression, never classification (479-class "Volume" is not a
+# classification target). Strings that are >= this fraction numerically parseable
+# are coerced and judged as numbers (handles numeric columns dirtied by junk rows).
+DEFAULT_MAX_CLASSIFICATION_UNIQUE: int = 20
+DEFAULT_NUMERIC_COERCE_FRACTION: float = 0.95
+# Integer-coded targets up to this many levels (with a low unique-to-rows ratio)
+# are still treated as discrete classes rather than regression.
+DEFAULT_MAX_INT_CLASSIFICATION_UNIQUE: int = 50
+
 # Training
 DEFAULT_CV_FOLDS: int = 5
 DEFAULT_N_JOBS: int = -1
