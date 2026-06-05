@@ -26,6 +26,7 @@ from core.metrics import (
     get_primary_metric,
     is_metric_higher_better,
     predict_with_optimal_threshold,
+    selection_score,
 )
 from core.model_registry import apply_imbalance_handling, build_default_registry
 from core.state import ErrorReport, ExperimentRecord, ModelResult, PipelineState
@@ -89,6 +90,7 @@ class ImprovementService:
     def _try_optuna(
         self, model_name: str, X_train: np.ndarray, y_train: np.ndarray,
         X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
+        seed: Optional[int] = None,
     ) -> tuple[Optional[Any], dict[str, Any]]:
         """Optuna hyperparameter optimization (if enabled and installed)."""
         try:
@@ -97,6 +99,8 @@ class ImprovementService:
         except ImportError:
             logger.info("Optuna not installed, skipping")
             return None, {}
+        if seed is None:
+            seed = self._seed
 
         registry = build_default_registry(self._seed)
         spec = registry.get(problem_type, model_name)
@@ -134,7 +138,7 @@ class ImprovementService:
             return metrics.get(primary, 0.0)
 
         direction = "maximize" if higher else "minimize"
-        study = optuna.create_study(direction=direction)
+        study = optuna.create_study(direction=direction, sampler=optuna.samplers.TPESampler(seed=seed))
         study.optimize(objective, n_trials=self._config.tuning_iterations, timeout=300)
 
         best_params = {**spec.default_params, **study.best_params}
@@ -142,6 +146,43 @@ class ImprovementService:
         best_model.fit(X_train, y_train)
         logger.info(f"Optuna best for {model_name}: {study.best_value:.4f}")
         return best_model, best_params
+
+    def _run_one_tuning_round(
+        self, model_name: str, X_train: np.ndarray, y_train: np.ndarray,
+        X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
+        n_classes: int, seed: int,
+    ) -> Optional[dict[str, Any]]:
+        """Tune ``model_name`` once and score it on the validation split.
+
+        Returns a dict with the fitted model, its params, validation metrics, the
+        F1-optimal threshold (binary only) and the selection score used to compare
+        rounds — or None if tuning could not run.
+        """
+        if self._config.use_optuna:
+            tuned, params = self._try_optuna(model_name, X_train, y_train, X_val, y_val, problem_type, seed)
+        else:
+            tuned, params = self._tune_with_randomized_search(model_name, X_train, y_train, problem_type, seed)
+        if tuned is None:
+            return None
+
+        y_prob = None
+        if hasattr(tuned, "predict_proba"):
+            try:
+                y_prob = tuned.predict_proba(X_val)
+            except Exception:
+                y_prob = None
+
+        threshold: Optional[float] = None
+        if problem_type == ProblemType.CLASSIFICATION and y_prob is not None and n_classes == 2:
+            preds, threshold = predict_with_optimal_threshold(y_val, y_prob, tuned.classes_)
+        else:
+            preds = tuned.predict(X_val)
+
+        metrics = compute_metrics(y_val, preds, problem_type, y_prob)
+        return {
+            "model": tuned, "params": params, "metrics": metrics,
+            "threshold": threshold, "score": selection_score(metrics, problem_type, n_classes),
+        }
 
     @log_stage_timing("improvement")
     def run(self, state: PipelineState, settings: Settings) -> PipelineState:
@@ -176,60 +217,73 @@ class ImprovementService:
 
         artifact_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id / "models")
         primary = get_primary_metric(problem_type)
-        prev_best = state.best_metric_value or 0.0
+        n_classes = int(len(np.unique(y_train)))
 
         improvements: list[str] = []
 
-        # Try tuning
-        if self._config.use_optuna:
-            tuned_model, best_params = self._try_optuna(best, X_train, y_train, X_val, y_val, problem_type)
+        # Baseline = the current champion's validation selection score (same metric
+        # used to crown it during training, so the comparison is consistent).
+        champ = next((r for r in state.model_results if r.is_best and r.metrics), None)
+        baseline_score = (
+            selection_score(champ.metrics, problem_type, n_classes)
+            if champ else (state.best_metric_value or 0.0)
+        )
+
+        best_cand: Optional[dict[str, Any]] = None
+        best_score = baseline_score
+        target = self._config.tuning_target_metric
+        max_iter = max(1, self._config.tuning_max_iterations)
+        patience = max(1, self._config.tuning_patience)
+
+        if target > 0 and baseline_score >= target:
+            improvements.append(f"Champion already at target ({baseline_score:.4f} >= {target}); skipping tuning")
+            logger.info(improvements[-1])
         else:
-            tuned_model, best_params = self._tune_with_randomized_search(best, X_train, y_train, problem_type, self._seed)
+            # Iterative tuning loop: keep searching (fresh seed each round) until the
+            # target score is reached, the round budget is spent, or we plateau.
+            no_improve = 0
+            for i in range(max_iter):
+                cand = self._run_one_tuning_round(
+                    best, X_train, y_train, X_val, y_val, problem_type, n_classes,
+                    seed=self._seed + 1 + i,
+                )
+                if cand is None:
+                    improvements.append(f"Round {i + 1}: tuning unavailable for {best}, stopping")
+                    break
+                if cand["score"] > best_score + 1e-9:
+                    best_score, best_cand, no_improve = cand["score"], cand, 0
+                    improvements.append(f"Round {i + 1}: {best} sel_score -> {best_score:.4f}")
+                    logger.info(improvements[-1])
+                else:
+                    no_improve += 1
+                    logger.info(f"Round {i + 1}: no improvement ({cand['score']:.4f} <= {best_score:.4f})")
+                if target > 0 and best_score >= target:
+                    improvements.append(f"Reached target {target} at round {i + 1}")
+                    break
+                if no_improve >= patience:
+                    improvements.append(f"No improvement for {patience} round(s); early stop at round {i + 1}")
+                    break
 
-        if tuned_model is not None:
-            y_prob = None
-            if hasattr(tuned_model, "predict_proba"):
-                try:
-                    y_prob = tuned_model.predict_proba(X_val)
-                except Exception:
-                    y_prob = None
-
-            threshold: Optional[float] = None
-            if (
-                problem_type == ProblemType.CLASSIFICATION
-                and y_prob is not None
-                and len(np.unique(y_train)) == 2
-            ):
-                preds, threshold = predict_with_optimal_threshold(y_val, y_prob, tuned_model.classes_)
-            else:
-                preds = tuned_model.predict(X_val)
-
-            metrics = compute_metrics(y_val, preds, problem_type, y_prob)
-            new_val = metrics.get(primary, 0.0)
-
-            higher = is_metric_higher_better(primary)
-            improved = (new_val > prev_best) if higher else (new_val < prev_best)
-
-            if improved:
-                model_path = artifact_dir / f"{best}_tuned_iter{state.retry_count}.joblib"
-                joblib.dump(tuned_model, model_path)
-                state.best_model_path = str(model_path)
-                state.best_metric_value = new_val
-                state.best_threshold = threshold
-                improvements.append(f"Tuned {best}: {primary} {prev_best:.4f}->{new_val:.4f}")
-                logger.info(f"Improvement found: {primary} {prev_best:.4f}->{new_val:.4f}")
-
-                # Update model results
-                state.model_results.append(ModelResult(
-                    model_name=f"{best}_tuned",
-                    model_type=problem_type.value,
-                    metrics=metrics, hyperparameters=best_params,
-                    model_path=str(model_path), is_best=True, status="trained",
-                    decision_threshold=threshold,
-                ))
-            else:
-                logger.info(f"No improvement: {primary} {new_val:.4f} vs {prev_best:.4f}")
-                improvements.append(f"Tuning attempted but no improvement for {best}")
+        if best_cand is not None:
+            metrics = best_cand["metrics"]
+            new_primary = metrics.get(primary, 0.0)
+            model_path = artifact_dir / f"{best}_tuned_iter{state.retry_count}.joblib"
+            joblib.dump(best_cand["model"], model_path)
+            state.best_model_path = str(model_path)
+            state.best_metric_value = new_primary
+            state.best_threshold = best_cand["threshold"]
+            logger.info(f"Improvement kept: {best} sel_score {baseline_score:.4f}->{best_score:.4f} "
+                        f"({primary}={new_primary:.4f})")
+            state.model_results.append(ModelResult(
+                model_name=f"{best}_tuned",
+                model_type=problem_type.value,
+                metrics=metrics, hyperparameters=best_cand["params"],
+                model_path=str(model_path), is_best=True, status="trained",
+                decision_threshold=best_cand["threshold"],
+            ))
+        else:
+            improvements.append(f"No improvement over champion ({best}) after tuning")
+            logger.info(improvements[-1])
 
         state.retry_count += 1
         state.experiment_history.append(ExperimentRecord(

@@ -39,6 +39,7 @@ from core.model_registry import (
     fit_model,
     get_fitted_n_estimators,
 )
+from core.resampling import maybe_resample
 from core.state import ErrorReport, ExperimentRecord, ModelResult, PipelineState
 from core.utils import ensure_directory, get_timestamp
 
@@ -54,7 +55,7 @@ class ModelTrainingService:
     def _train_single_model(
         self, spec: ModelSpec, X_train: np.ndarray, y_train: np.ndarray,
         X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
-        artifact_dir: Path, has_validation: bool = False,
+        artifact_dir: Path, has_validation: bool = False, resampled: bool = False,
     ) -> ModelResult:
         """Train a single model and return its results."""
         start = time.perf_counter()
@@ -62,15 +63,23 @@ class ModelTrainingService:
 
         threshold: Optional[float] = None
         try:
-            model = self._registry.create_instance(problem_type, spec.name)
+            # When the training set was already (partially) balanced by SMOTE, turn
+            # off the model's own class-weighting so the imbalance isn't corrected
+            # twice (which over-shifts the decision boundary and hurts precision).
+            overrides = {}
+            if resampled and "class_weight" in spec.default_params:
+                overrides["class_weight"] = None
+            model = self._registry.create_instance(problem_type, spec.name, overrides or None)
             if problem_type == ProblemType.CLUSTERING:
                 model.fit(X_train)
                 preds = model.predict(X_train) if hasattr(model, "predict") else model.labels_
                 metrics = compute_metrics(X_train, preds, problem_type)
                 train_metrics = metrics.copy()
             else:
-                # Inject data-dependent imbalance params (e.g. scale_pos_weight) before fit.
-                model = apply_imbalance_handling(model, spec, y_train)
+                # Inject data-dependent imbalance params (e.g. scale_pos_weight) before
+                # fit — unless SMOTE already balanced the data (see above).
+                if not resampled:
+                    model = apply_imbalance_handling(model, spec, y_train)
                 # Use early stopping against the validation set for boosters when we
                 # have a genuine (non-degenerate) validation split.
                 eval_X = X_val if has_validation else None
@@ -274,6 +283,7 @@ class ModelTrainingService:
         target = state.target_column
 
         has_validation = False
+        resampled = False
         if problem_type == ProblemType.CLUSTERING:
             X_train = train_df.select_dtypes(include=[np.number]).values
             y_train = np.zeros(len(X_train))  # placeholder
@@ -292,6 +302,28 @@ class ModelTrainingService:
             else:
                 X_val, y_val = X_train, y_train
                 has_validation = False
+
+            # Synthesise minority-class examples in the TRAIN split only (never
+            # val/test) for imbalanced binary targets. When applied, each model's
+            # class-weighting is neutralised downstream to avoid double-correcting.
+            tcfg = settings.training
+            rr = maybe_resample(
+                X_train, y_train, problem_type,
+                enabled=tcfg.use_smote,
+                sampling_strategy=tcfg.smote_sampling_strategy,
+                min_minority_fraction=tcfg.smote_min_minority_fraction,
+                max_train_samples=tcfg.smote_max_train_samples,
+                k_neighbors=tcfg.smote_k_neighbors,
+                seed=settings.pipeline.random_seed,
+            )
+            if rr.applied:
+                X_train, y_train = rr.X, rr.y
+                resampled = True
+                state.data_quality_flags["resampling"] = {
+                    "method": rr.method, "minority_before": rr.minority_before,
+                    "minority_after": rr.minority_after,
+                    "target_ratio": tcfg.smote_sampling_strategy,
+                }
 
         # Drop models that don't scale to this many rows (e.g. kernel SVC is
         # O(n^2)+ and would hang on large data) rather than letting them stall the run.
@@ -313,7 +345,7 @@ class ModelTrainingService:
                 futures = {
                     executor.submit(
                         self._train_single_model, spec, X_train, y_train, X_val, y_val,
-                        problem_type, artifact_dir, has_validation,
+                        problem_type, artifact_dir, has_validation, resampled,
                     ): spec.name
                     for spec in specs
                 }
@@ -322,7 +354,8 @@ class ModelTrainingService:
         else:
             for spec in specs:
                 results.append(self._train_single_model(
-                    spec, X_train, y_train, X_val, y_val, problem_type, artifact_dir, has_validation,
+                    spec, X_train, y_train, X_val, y_val, problem_type, artifact_dir,
+                    has_validation, resampled,
                 ))
 
         primary_metric = get_primary_metric(problem_type)

@@ -42,10 +42,18 @@ from core.constants import (
     DEFAULT_RANDOM_SEED,
     DEFAULT_SAMPLE_ROWS,
     DEFAULT_SELECT_K_BEST,
+    DEFAULT_SMOTE_K_NEIGHBORS,
+    DEFAULT_SMOTE_MAX_TRAIN_SAMPLES,
+    DEFAULT_SMOTE_MIN_MINORITY_FRACTION,
+    DEFAULT_SMOTE_SAMPLING_STRATEGY,
     DEFAULT_TEST_RATIO,
     DEFAULT_TIMEOUT_PER_MODEL,
     DEFAULT_TRAIN_RATIO,
     DEFAULT_TUNING_ITERATIONS,
+    DEFAULT_TUNING_MAX_ITERATIONS,
+    DEFAULT_TUNING_PATIENCE,
+    DEFAULT_TUNING_TARGET_METRIC,
+    DEFAULT_USE_SMOTE,
     DEFAULT_VAL_RATIO,
     DEFAULT_VARIANCE_THRESHOLD,
 )
@@ -148,6 +156,18 @@ class TrainingConfig(BaseModel):
     cv_folds: int = DEFAULT_CV_FOLDS
     timeout_per_model_seconds: int = DEFAULT_TIMEOUT_PER_MODEL
 
+    # ── Imbalanced-target resampling (SMOTE) ─────────────────────────────────
+    # Applied to the TRAIN split only (never val/test), before fitting. Only
+    # triggers on binary classification whose minority fraction is below
+    # ``smote_min_minority_fraction``. Validated to beat class-weighting alone on
+    # extreme imbalance (creditcard). Partial oversampling — full balancing
+    # (strategy 1.0) empirically HURTS boosters, so the default is moderate.
+    use_smote: bool = DEFAULT_USE_SMOTE
+    smote_sampling_strategy: float = DEFAULT_SMOTE_SAMPLING_STRATEGY  # target minority/majority ratio
+    smote_min_minority_fraction: float = DEFAULT_SMOTE_MIN_MINORITY_FRACTION
+    smote_max_train_samples: int = DEFAULT_SMOTE_MAX_TRAIN_SAMPLES
+    smote_k_neighbors: int = DEFAULT_SMOTE_K_NEIGHBORS
+
 
 class ErrorDetectionConfig(BaseModel):
     """Thresholds for automated error / anomaly detection."""
@@ -161,9 +181,18 @@ class ErrorDetectionConfig(BaseModel):
 class ImprovementConfig(BaseModel):
     """Improvement loop / hyperparameter tuning settings."""
 
-    tuning_iterations: int = DEFAULT_TUNING_ITERATIONS
+    tuning_iterations: int = DEFAULT_TUNING_ITERATIONS  # inner search budget per round
     early_stopping_rounds: int = DEFAULT_EARLY_STOPPING_ROUNDS
     use_optuna: bool = False
+
+    # Iterative tuning loop: keep tuning the champion across rounds (each with a
+    # fresh search seed) until the validation selection score reaches
+    # ``tuning_target_metric`` (0 disables that early stop), capped at
+    # ``tuning_max_iterations`` rounds and stopping after ``tuning_patience``
+    # consecutive rounds without improvement.
+    tuning_target_metric: float = DEFAULT_TUNING_TARGET_METRIC
+    tuning_max_iterations: int = DEFAULT_TUNING_MAX_ITERATIONS
+    tuning_patience: int = DEFAULT_TUNING_PATIENCE
 
 
 class LoggingConfig(BaseModel):
@@ -230,6 +259,8 @@ def _apply_env_overrides(data: dict) -> dict:
         "ARTIFACT_DIR": ("pipeline", "artifact_dir"),
         "REPORT_DIR": ("pipeline", "report_dir"),
         "LOG_DIR": ("pipeline", "log_dir"),
+        "USE_SMOTE": ("training", "use_smote"),
+        "SMOTE_SAMPLING_STRATEGY": ("training", "smote_sampling_strategy"),
     }
     for env_key, (section, field) in env_map.items():
         env_val = os.environ.get(env_key)

@@ -130,6 +130,25 @@ DEFAULT_CV_FOLDS: int = 5
 DEFAULT_N_JOBS: int = -1
 DEFAULT_TIMEOUT_PER_MODEL: int = 300  # seconds
 
+# SMOTE / imbalanced-target resampling (train split only).
+# Default OFF by evidence: in isolation SMOTE lifts a single XGB/LGBM on raw
+# features, but end-to-end on the pipeline's feature-engineered space it did NOT
+# beat the existing handling (class_weight / scale_pos_weight + F1-optimal
+# threshold + PR-AUC selection) on creditcard — champion f1 0.846 (weighting) vs
+# 0.830 (SMOTE). Kept fully wired and configurable: set training.use_smote=True
+# (or env USE_SMOTE=true) to enable for datasets where it helps.
+DEFAULT_USE_SMOTE: bool = False
+# Target minority/majority ratio after oversampling. PARTIAL on purpose: moderate
+# oversampling (0.1-0.5) helps in isolation, but fully balancing (1.0) empirically
+# hurts gradient boosters. 0.25 is a safe middle ground when enabled.
+DEFAULT_SMOTE_SAMPLING_STRATEGY: float = 0.25
+# Only resample when the minority class is below this fraction of all rows; data
+# that is already reasonably balanced is left untouched.
+DEFAULT_SMOTE_MIN_MINORITY_FRACTION: float = 0.20
+# Skip SMOTE above this many training rows (synthetic blow-up / cost guard).
+DEFAULT_SMOTE_MAX_TRAIN_SAMPLES: int = 500_000
+DEFAULT_SMOTE_K_NEIGHBORS: int = 5
+
 # Error detection
 DEFAULT_MIN_CLASSIFICATION_F1: float = 0.30
 DEFAULT_MIN_REGRESSION_R2: float = 0.10
@@ -139,6 +158,13 @@ DEFAULT_MAX_FEATURE_COUNT: int = 500
 # Improvement
 DEFAULT_TUNING_ITERATIONS: int = 50
 DEFAULT_EARLY_STOPPING_ROUNDS: int = 10
+# Iterative tuning loop: stop early once the champion's validation selection score
+# reaches this target (0 disables the early stop); otherwise run up to
+# DEFAULT_TUNING_MAX_ITERATIONS rounds, stopping after DEFAULT_TUNING_PATIENCE
+# consecutive rounds without improvement.
+DEFAULT_TUNING_TARGET_METRIC: float = 0.0
+DEFAULT_TUNING_MAX_ITERATIONS: int = 5
+DEFAULT_TUNING_PATIENCE: int = 2
 
 # Data loading
 DEFAULT_CHUNK_SIZE: int = 50_000
