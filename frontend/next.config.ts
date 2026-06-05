@@ -7,6 +7,13 @@ const nextConfig: NextConfig = {
     root: import.meta.dirname,
   },
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // The dev server proxies /api/* to the FastAPI backend and buffers the request
+  // body in memory, capped at 10MB by default. Dataset uploads are far larger
+  // (e.g. creditcard.csv ~150MB), so the upload was being truncated and the
+  // backend connection reset ("Backend server is unavailable"). Raise the cap.
+  experimental: {
+    proxyClientMaxBodySize: "300mb",
+  },
   images: {
     remotePatterns: [
       {
