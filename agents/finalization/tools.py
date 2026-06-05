@@ -14,7 +14,9 @@ import numpy as np
 import pandas as pd
 
 from core.config import Settings
+from core.constants import ProblemType
 from core.logging_config import get_logger, log_stage_timing
+from core.metrics import compute_metrics, confusion_counts, positive_class_proba
 from core.state import ErrorReport, PipelineState
 from core.utils import ensure_directory, get_timestamp, safe_json_serialize
 
@@ -27,6 +29,10 @@ class FinalizationService:
         run_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id)
         report_dir = ensure_directory(Path(settings.pipeline.report_dir) / state.run_id)
 
+        # Re-score the (possibly improvement-tuned) champion on the untouched test
+        # split so the report's headline numbers are an honest generalization estimate.
+        self._evaluate_on_test(state)
+
         # Save final metadata
         metadata = {
             "run_id": state.run_id,
@@ -35,6 +41,9 @@ class FinalizationService:
             "best_model": state.best_model_name,
             "best_metric": state.best_metric_name,
             "best_value": state.best_metric_value,
+            "decision_threshold": state.best_threshold,
+            "test_metrics": state.test_metrics,
+            "test_confusion": state.test_confusion,
             "total_retries": state.retry_count,
             "completed_stages": state.completed_stages,
             "started_at": state.started_at,
@@ -90,6 +99,50 @@ class FinalizationService:
         state.mark_stage_end("finalization")
         logger.info(f"Finalization complete. Artifacts saved to {run_dir}")
         return state
+
+    def _evaluate_on_test(self, state: PipelineState) -> None:
+        """Score the final champion on the held-out test split at its tuned threshold."""
+        problem_type = ProblemType(state.problem_type) if state.problem_type else None
+        if (
+            not state.test_path or not state.best_model_path
+            or problem_type in (None, ProblemType.CLUSTERING)
+        ):
+            return
+        try:
+            test_df = pd.read_csv(state.test_path, low_memory=False)
+            target = state.target_column
+            if not target or target not in test_df.columns:
+                return
+            X_test = test_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+            y_test = test_df[target].values
+            model = joblib.load(state.best_model_path)
+
+            y_prob = None
+            if hasattr(model, "predict_proba"):
+                try:
+                    y_prob = model.predict_proba(X_test)
+                except Exception:
+                    y_prob = None
+
+            if (
+                problem_type == ProblemType.CLASSIFICATION
+                and y_prob is not None
+                and state.best_threshold is not None
+                and len(np.unique(y_test)) == 2
+            ):
+                classes = np.asarray(getattr(model, "classes_", [0, 1]))
+                pos = positive_class_proba(y_prob)
+                preds = np.where(pos >= state.best_threshold, classes[1], classes[0])
+            else:
+                preds = model.predict(X_test)
+
+            state.test_metrics = compute_metrics(y_test, preds, problem_type, y_prob)
+            cm = confusion_counts(y_test, preds)
+            if cm:
+                state.test_confusion = cm
+            logger.info(f"Held-out TEST metrics: {state.test_metrics}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Test-set evaluation failed (non-critical): {e}")
 
     def _generate_shap(self, state: PipelineState, run_dir: Path) -> None:
         """Generate SHAP explanations for the best model."""
@@ -186,9 +239,44 @@ class FinalizationService:
                 f"The best performing model was **{state.best_model_name}**, achieving "
                 f"a **{metric_label} of {state.best_metric_value:.4f}**.",
                 "",
-                "---",
-                "",
             ]
+            if state.best_threshold is not None:
+                lines += [
+                    f"Predictions use an F1-optimised decision threshold of "
+                    f"**{state.best_threshold:.4f}** on the positive-class probability "
+                    f"(not the default 0.5), tuned for the class imbalance in the target.",
+                    "",
+                ]
+            lines += ["---", ""]
+
+        # ── Held-Out Test Performance ─────────────────────────────────────────
+        if state.test_metrics:
+            lines += [
+                "## Held-Out Test Performance",
+                "",
+                "Honest generalization estimate — the champion scored on the untouched "
+                "test split at its tuned threshold.",
+                "",
+                "| Metric | Value |",
+                "|--------|-------|",
+            ]
+            for key in ("f1", "precision", "recall", "roc_auc", "pr_auc",
+                        "balanced_accuracy", "accuracy", "r2", "rmse", "mae"):
+                if key in state.test_metrics:
+                    lines.append(f"| {key.upper()} | {state.test_metrics[key]:.4f} |")
+            lines.append("")
+            cm = state.test_confusion
+            if cm:
+                lines += [
+                    "**Confusion Matrix (test):**",
+                    "",
+                    "| | Predicted 0 | Predicted 1 |",
+                    "|---|---|---|",
+                    f"| **Actual 0** | {cm.get('tn', 0):,} (TN) | {cm.get('fp', 0):,} (FP) |",
+                    f"| **Actual 1** | {cm.get('fn', 0):,} (FN) | {cm.get('tp', 0):,} (TP) |",
+                    "",
+                ]
+            lines += ["---", ""]
 
         # ── Dataset Summary ───────────────────────────────────────────────────
         if state.dataset_metadata:
@@ -264,7 +352,12 @@ class FinalizationService:
         all_metric_keys: set[str] = set()
         for r in state.model_results:
             all_metric_keys.update(r.metrics.keys())
-        metric_keys = sorted(all_metric_keys)[:5]
+        # Show the most decision-relevant metrics first rather than alphabetical.
+        preferred = ["f1", "precision", "recall", "roc_auc", "pr_auc",
+                     "balanced_accuracy", "r2", "rmse", "mae", "silhouette_score"]
+        metric_keys = [k for k in preferred if k in all_metric_keys][:5]
+        if not metric_keys:
+            metric_keys = sorted(all_metric_keys)[:5]
 
         if metric_keys:
             mh = " | ".join(k.upper() for k in metric_keys)

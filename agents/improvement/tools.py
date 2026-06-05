@@ -21,8 +21,13 @@ from core.config import ImprovementConfig, Settings
 from core.constants import ProblemType
 from core.exceptions import ImprovementError
 from core.logging_config import get_logger, log_stage_timing
-from core.metrics import compute_metrics, get_primary_metric, is_metric_higher_better
-from core.model_registry import build_default_registry
+from core.metrics import (
+    compute_metrics,
+    get_primary_metric,
+    is_metric_higher_better,
+    predict_with_optimal_threshold,
+)
+from core.model_registry import apply_imbalance_handling, build_default_registry
 from core.state import ErrorReport, ExperimentRecord, ModelResult, PipelineState
 from core.utils import ensure_directory
 
@@ -43,6 +48,9 @@ class ImprovementService:
         registry = build_default_registry(seed)
         spec = registry.get(problem_type, model_name)
         model = registry.create_instance(problem_type, model_name)
+        # Inject imbalance params (e.g. scale_pos_weight) — it's a fixed param, so
+        # cloned estimators inside the search inherit it.
+        model = apply_imbalance_handling(model, spec, y_train)
 
         if not spec.search_space:
             logger.info(f"No search space for {model_name}, skipping tuning")
@@ -50,18 +58,29 @@ class ImprovementService:
             return model, spec.default_params
 
         primary = get_primary_metric(problem_type)
-        scoring_map = {"f1": "f1_weighted", "r2": "r2", "rmse": "neg_root_mean_squared_error",
+        # For binary targets, optimise the minority-class F1 ("f1", pos_label=1)
+        # rather than "f1_weighted", which is dominated by the majority class.
+        binary = problem_type == ProblemType.CLASSIFICATION and len(np.unique(y_train)) == 2
+        f1_scoring = "f1" if binary else "f1_weighted"
+        scoring_map = {"f1": f1_scoring, "r2": "r2", "rmse": "neg_root_mean_squared_error",
                         "accuracy": "accuracy", "silhouette_score": None}
-        scoring = scoring_map.get(primary, "f1_weighted")
+        scoring = scoring_map.get(primary, f1_scoring)
 
         if scoring is None:
             model.fit(X_train, y_train)
             return model, spec.default_params
 
         n_iter = min(self._config.tuning_iterations, _count_combinations(spec.search_space))
+        # Stratified folds keep the minority class represented in every split —
+        # essential for stable tuning on imbalanced targets.
+        if binary or (problem_type == ProblemType.CLASSIFICATION):
+            from sklearn.model_selection import StratifiedKFold
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+        else:
+            cv = 5
         search = RandomizedSearchCV(
             model, spec.search_space, n_iter=n_iter, scoring=scoring,
-            cv=3, random_state=seed, n_jobs=-1, error_score="raise",
+            cv=cv, random_state=seed, n_jobs=-1, error_score="raise",
         )
         search.fit(X_train, y_train)
         logger.info(f"{model_name} best params: {search.best_params_} (score={search.best_score_:.4f})")
@@ -99,9 +118,18 @@ class ImprovementService:
                     params[key] = trial.suggest_categorical(key, values)
 
             merged = {**spec.default_params, **params}
-            model = spec.factory(**merged)
+            model = apply_imbalance_handling(spec.factory(**merged), spec, y_train)
             model.fit(X_train, y_train)
-            preds = model.predict(X_val)
+            if (
+                problem_type == ProblemType.CLASSIFICATION
+                and hasattr(model, "predict_proba")
+                and len(np.unique(y_train)) == 2
+            ):
+                preds, _ = predict_with_optimal_threshold(
+                    y_val, model.predict_proba(X_val), model.classes_
+                )
+            else:
+                preds = model.predict(X_val)
             metrics = compute_metrics(y_val, preds, problem_type)
             return metrics.get(primary, 0.0)
 
@@ -110,7 +138,7 @@ class ImprovementService:
         study.optimize(objective, n_trials=self._config.tuning_iterations, timeout=300)
 
         best_params = {**spec.default_params, **study.best_params}
-        best_model = spec.factory(**best_params)
+        best_model = apply_imbalance_handling(spec.factory(**best_params), spec, y_train)
         best_model.fit(X_train, y_train)
         logger.info(f"Optuna best for {model_name}: {study.best_value:.4f}")
         return best_model, best_params
@@ -159,13 +187,23 @@ class ImprovementService:
             tuned_model, best_params = self._tune_with_randomized_search(best, X_train, y_train, problem_type, self._seed)
 
         if tuned_model is not None:
-            preds = tuned_model.predict(X_val)
             y_prob = None
             if hasattr(tuned_model, "predict_proba"):
                 try:
                     y_prob = tuned_model.predict_proba(X_val)
                 except Exception:
-                    pass
+                    y_prob = None
+
+            threshold: Optional[float] = None
+            if (
+                problem_type == ProblemType.CLASSIFICATION
+                and y_prob is not None
+                and len(np.unique(y_train)) == 2
+            ):
+                preds, threshold = predict_with_optimal_threshold(y_val, y_prob, tuned_model.classes_)
+            else:
+                preds = tuned_model.predict(X_val)
+
             metrics = compute_metrics(y_val, preds, problem_type, y_prob)
             new_val = metrics.get(primary, 0.0)
 
@@ -177,6 +215,7 @@ class ImprovementService:
                 joblib.dump(tuned_model, model_path)
                 state.best_model_path = str(model_path)
                 state.best_metric_value = new_val
+                state.best_threshold = threshold
                 improvements.append(f"Tuned {best}: {primary} {prev_best:.4f}->{new_val:.4f}")
                 logger.info(f"Improvement found: {primary} {prev_best:.4f}->{new_val:.4f}")
 
@@ -186,6 +225,7 @@ class ImprovementService:
                     model_type=problem_type.value,
                     metrics=metrics, hyperparameters=best_params,
                     model_path=str(model_path), is_best=True, status="trained",
+                    decision_threshold=threshold,
                 ))
             else:
                 logger.info(f"No improvement: {primary} {new_val:.4f} vs {prev_best:.4f}")

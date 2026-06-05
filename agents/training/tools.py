@@ -23,8 +23,22 @@ from core.config import Settings, TrainingConfig
 from core.constants import ProblemType
 from core.exceptions import TrainingError
 from core.logging_config import get_logger, log_stage_timing
-from core.metrics import compute_metrics, get_primary_metric, is_metric_higher_better
-from core.model_registry import ModelRegistry, ModelSpec, build_default_registry
+from core.metrics import (
+    compute_metrics,
+    confusion_counts,
+    get_primary_metric,
+    is_metric_higher_better,
+    positive_class_proba,
+    predict_with_optimal_threshold,
+)
+from core.model_registry import (
+    ModelRegistry,
+    ModelSpec,
+    apply_imbalance_handling,
+    build_default_registry,
+    fit_model,
+    get_fitted_n_estimators,
+)
 from core.state import ErrorReport, ExperimentRecord, ModelResult, PipelineState
 from core.utils import ensure_directory, get_timestamp
 
@@ -40,12 +54,13 @@ class ModelTrainingService:
     def _train_single_model(
         self, spec: ModelSpec, X_train: np.ndarray, y_train: np.ndarray,
         X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
-        artifact_dir: Path,
+        artifact_dir: Path, has_validation: bool = False,
     ) -> ModelResult:
         """Train a single model and return its results."""
         start = time.perf_counter()
         mem_before = psutil.Process(os.getpid()).memory_info().rss / (1024**2)
 
+        threshold: Optional[float] = None
         try:
             model = self._registry.create_instance(problem_type, spec.name)
             if problem_type == ProblemType.CLUSTERING:
@@ -54,16 +69,38 @@ class ModelTrainingService:
                 metrics = compute_metrics(X_train, preds, problem_type)
                 train_metrics = metrics.copy()
             else:
-                model.fit(X_train, y_train)
-                preds = model.predict(X_val)
+                # Inject data-dependent imbalance params (e.g. scale_pos_weight) before fit.
+                model = apply_imbalance_handling(model, spec, y_train)
+                # Use early stopping against the validation set for boosters when we
+                # have a genuine (non-degenerate) validation split.
+                eval_X = X_val if has_validation else None
+                eval_y = y_val if has_validation else None
+                model = fit_model(model, spec, X_train, y_train, eval_X=eval_X, eval_y=eval_y)
+
                 y_prob = None
                 if spec.supports_probabilities and hasattr(model, "predict_proba"):
                     try:
                         y_prob = model.predict_proba(X_val)
                     except Exception:
-                        pass
+                        y_prob = None
+
+                # For binary classification, pick the F1-optimal threshold instead of
+                # the naive 0.5 cutoff — critical for imbalanced targets like fraud.
+                if (
+                    problem_type == ProblemType.CLASSIFICATION
+                    and y_prob is not None
+                    and len(np.unique(y_train)) == 2
+                ):
+                    preds, threshold = predict_with_optimal_threshold(y_val, y_prob, model.classes_)
+                    train_pos = positive_class_proba(model.predict_proba(X_train))
+                    train_preds = np.where(
+                        train_pos >= threshold, model.classes_[1], model.classes_[0]
+                    )
+                else:
+                    preds = model.predict(X_val)
+                    train_preds = model.predict(X_train)
+
                 metrics = compute_metrics(y_val, preds, problem_type, y_prob)
-                train_preds = model.predict(X_train)
                 train_metrics = compute_metrics(y_train, train_preds, problem_type)
 
             elapsed = time.perf_counter() - start
@@ -73,14 +110,21 @@ class ModelTrainingService:
             model_path = artifact_dir / f"{spec.name}.joblib"
             joblib.dump(model, model_path)
 
+            # Record the params actually used, including the early-stopped tree count.
+            used_params = dict(spec.default_params)
+            fitted_trees = get_fitted_n_estimators(model)
+            if fitted_trees is not None:
+                used_params["n_estimators"] = fitted_trees
+
             result = ModelResult(
                 model_name=spec.name, model_type=spec.problem_type.value,
                 metrics=metrics, train_metrics=train_metrics,
                 training_time_seconds=round(elapsed, 3),
                 memory_usage_mb=round(mem_after - mem_before, 2),
                 model_path=str(model_path),
-                hyperparameters=spec.default_params,
+                hyperparameters=used_params,
                 status="trained",
+                decision_threshold=threshold,
             )
             logger.info(f"{spec.name}: {metrics} ({elapsed:.2f}s)")
             return result
@@ -94,6 +138,120 @@ class ModelTrainingService:
                 status="failed",
                 hyperparameters=spec.default_params,
             )
+
+    def _build_ensemble(
+        self, results: list[ModelResult], X_train: np.ndarray, y_train: np.ndarray,
+        X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
+        artifact_dir: Path, primary_metric: str, higher_better: bool, top_k: int = 3,
+    ) -> Optional[ModelResult]:
+        """Average the probabilities of the top-K classifiers into a soft-voting ensemble."""
+        if problem_type != ProblemType.CLASSIFICATION:
+            return None
+
+        # Rank trained, probability-capable members by their validation metric.
+        candidates = [
+            r for r in results
+            if r.status == "trained" and r.model_path and primary_metric in r.metrics
+        ]
+        candidates.sort(key=lambda r: r.metrics[primary_metric], reverse=higher_better)
+
+        members, names, weights = [], [], []
+        ref_classes = None
+        for r in candidates:
+            if len(members) >= top_k:
+                break
+            try:
+                est = joblib.load(r.model_path)
+                if not hasattr(est, "predict_proba"):
+                    continue
+                classes = np.asarray(getattr(est, "classes_", []))
+                if ref_classes is None:
+                    ref_classes = classes
+                elif not np.array_equal(classes, ref_classes):
+                    continue  # incompatible label ordering — skip
+                members.append(est)
+                names.append(r.model_name)
+                weights.append(max(r.metrics[primary_metric], 1e-3))
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Ensemble: could not load {r.model_name}: {e}")
+
+        if len(members) < 2 or ref_classes is None:
+            return None  # nothing to gain from a 1-member ensemble
+
+        start = time.perf_counter()
+        try:
+            from core.ensemble import ProbabilityAveragingEnsemble
+
+            ens = ProbabilityAveragingEnsemble(members, ref_classes, names, weights)
+            y_prob = ens.predict_proba(X_val)
+            threshold: Optional[float] = None
+            if len(ref_classes) == 2:
+                preds, threshold = predict_with_optimal_threshold(y_val, y_prob, ref_classes)
+                train_pos = positive_class_proba(ens.predict_proba(X_train))
+                train_preds = np.where(train_pos >= threshold, ref_classes[1], ref_classes[0])
+            else:
+                preds = ens.predict(X_val)
+                train_preds = ens.predict(X_train)
+
+            metrics = compute_metrics(y_val, preds, problem_type, y_prob)
+            train_metrics = compute_metrics(y_train, ens.predict(X_train) if len(ref_classes) != 2 else train_preds, problem_type)
+
+            model_path = artifact_dir / "VotingEnsemble.joblib"
+            joblib.dump(ens, model_path)
+            elapsed = round(time.perf_counter() - start, 3)
+            logger.info(f"VotingEnsemble({'+'.join(names)}): {primary_metric}={metrics.get(primary_metric, 0):.4f}")
+            return ModelResult(
+                model_name="VotingEnsemble", model_type=problem_type.value,
+                metrics=metrics, train_metrics=train_metrics,
+                training_time_seconds=elapsed, model_path=str(model_path),
+                hyperparameters={"members": names, "voting": "soft", "weights": [round(w, 4) for w in weights]},
+                status="trained", decision_threshold=threshold,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Ensemble construction failed: {e}")
+            return None
+
+    def _evaluate_on_test(
+        self, state: PipelineState, settings: Settings,
+        problem_type: ProblemType, target: Optional[str],
+    ) -> None:
+        """Score the selected champion on the untouched test split (honest estimate)."""
+        if not state.test_path or not state.best_model_path or problem_type == ProblemType.CLUSTERING:
+            return
+        try:
+            test_df = pd.read_csv(state.test_path, low_memory=False)
+            if not target or target not in test_df.columns:
+                return
+            X_test = test_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+            y_test = test_df[target].values
+            model = joblib.load(state.best_model_path)
+
+            y_prob = None
+            if hasattr(model, "predict_proba"):
+                try:
+                    y_prob = model.predict_proba(X_test)
+                except Exception:
+                    y_prob = None
+
+            if (
+                problem_type == ProblemType.CLASSIFICATION
+                and y_prob is not None
+                and state.best_threshold is not None
+                and len(np.unique(y_test)) == 2
+            ):
+                classes = np.asarray(getattr(model, "classes_", [0, 1]))
+                pos = positive_class_proba(y_prob)
+                preds = np.where(pos >= state.best_threshold, classes[1], classes[0])
+            else:
+                preds = model.predict(X_test)
+
+            state.test_metrics = compute_metrics(y_test, preds, problem_type, y_prob)
+            cm = confusion_counts(y_test, preds)
+            if cm:
+                state.test_confusion = cm
+            logger.info(f"Held-out TEST metrics: {state.test_metrics}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Test-set evaluation failed (non-critical): {e}")
 
     @log_stage_timing("model_training")
     def run(self, state: PipelineState, settings: Settings) -> PipelineState:
@@ -112,6 +270,7 @@ class ModelTrainingService:
         train_df = pd.read_csv(state.train_path, low_memory=False)
         target = state.target_column
 
+        has_validation = False
         if problem_type == ProblemType.CLUSTERING:
             X_train = train_df.select_dtypes(include=[np.number]).values
             y_train = np.zeros(len(X_train))  # placeholder
@@ -126,8 +285,19 @@ class ModelTrainingService:
                 val_df = pd.read_csv(state.val_path, low_memory=False)
                 X_val = val_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
                 y_val = val_df[target].values
+                has_validation = len(X_val) > 0
             else:
                 X_val, y_val = X_train, y_train
+                has_validation = False
+
+        # Drop models that don't scale to this many rows (e.g. kernel SVC is
+        # O(n^2)+ and would hang on large data) rather than letting them stall the run.
+        n_train = len(X_train)
+        kept_specs = [s for s in specs if s.max_train_samples is None or n_train <= s.max_train_samples]
+        skipped = [s.name for s in specs if s not in kept_specs]
+        if skipped:
+            logger.info(f"Skipping {skipped} — train set has {n_train} rows (exceeds their scalability limit)")
+        specs = kept_specs or specs  # never end up with zero models
 
         artifact_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id / "models")
 
@@ -139,7 +309,8 @@ class ModelTrainingService:
             with ThreadPoolExecutor(max_workers=n_workers) as executor:
                 futures = {
                     executor.submit(
-                        self._train_single_model, spec, X_train, y_train, X_val, y_val, problem_type, artifact_dir
+                        self._train_single_model, spec, X_train, y_train, X_val, y_val,
+                        problem_type, artifact_dir, has_validation,
                     ): spec.name
                     for spec in specs
                 }
@@ -147,11 +318,22 @@ class ModelTrainingService:
                     results.append(future.result())
         else:
             for spec in specs:
-                results.append(self._train_single_model(spec, X_train, y_train, X_val, y_val, problem_type, artifact_dir))
+                results.append(self._train_single_model(
+                    spec, X_train, y_train, X_val, y_val, problem_type, artifact_dir, has_validation,
+                ))
 
-        # Select best model
         primary_metric = get_primary_metric(problem_type)
         higher_better = is_metric_higher_better(primary_metric)
+
+        # Build a soft-voting ensemble from the strongest classifiers — frequently
+        # beats any single model by averaging out their individual errors.
+        ensemble = self._build_ensemble(
+            results, X_train, y_train, X_val, y_val, problem_type, artifact_dir, primary_metric, higher_better,
+        )
+        if ensemble is not None:
+            results.append(ensemble)
+
+        # Select best model
         trained = [r for r in results if r.status == "trained" and primary_metric in r.metrics]
 
         if trained:
@@ -161,7 +343,12 @@ class ModelTrainingService:
             state.best_model_path = best.model_path
             state.best_metric_name = primary_metric
             state.best_metric_value = best.metrics[primary_metric]
-            logger.info(f"Best model: {best.model_name} ({primary_metric}={best.metrics[primary_metric]:.4f})")
+            state.best_threshold = best.decision_threshold
+            thr_note = f", threshold={best.decision_threshold:.4f}" if best.decision_threshold is not None else ""
+            logger.info(f"Best model: {best.model_name} ({primary_metric}={best.metrics[primary_metric]:.4f}{thr_note})")
+
+            # Honest held-out evaluation of the champion on the untouched test set.
+            self._evaluate_on_test(state, settings, problem_type, target)
 
         state.model_results = results
         state.experiment_history.append(ExperimentRecord(

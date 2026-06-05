@@ -69,6 +69,9 @@ class ModelResult(BaseModel):
     hyperparameters: dict[str, Any] = Field(default_factory=dict)
     is_best: bool = False
     status: str = "pending"
+    # F1-optimal decision threshold on positive-class probability (binary only).
+    # None means the default 0.5 / argmax decision rule was used.
+    decision_threshold: Optional[float] = None
 
 
 class ErrorReport(BaseModel):
@@ -122,6 +125,11 @@ class PipelineState(BaseModel):
     best_model_path: Optional[str] = None
     best_metric_name: Optional[str] = None
     best_metric_value: Optional[float] = None
+    best_threshold: Optional[float] = None
+    # Honest held-out test-set evaluation of the champion model (computed once,
+    # at the chosen decision threshold). Empty until the test split is scored.
+    test_metrics: dict[str, float] = Field(default_factory=dict)
+    test_confusion: dict[str, int] = Field(default_factory=dict)
 
     # Summaries
     preprocessing_summary: Optional[PreprocessingSummary] = None

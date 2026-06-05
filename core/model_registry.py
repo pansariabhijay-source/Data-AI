@@ -30,6 +30,16 @@ class ModelSpec:
     search_space: dict[str, list[Any]] = field(default_factory=dict)
     requires_scaling: bool = False
     supports_probabilities: bool = False
+    # Name of a data-dependent imbalance hyperparameter to inject at fit time
+    # (e.g. XGBoost's "scale_pos_weight"). Models that accept ``class_weight``
+    # set it directly in ``default_params`` instead.
+    imbalance_param: Optional[str] = None
+    # Gradient boosters that can train with early stopping against a validation
+    # set — lets them grow many more trees but stop before overfitting.
+    supports_early_stopping: bool = False
+    # Skip this model when the training set is larger than this (e.g. kernel SVC
+    # is O(n^2)+ and will hang / waste time on big data). None = no limit.
+    max_train_samples: Optional[int] = None
 
 
 class ModelRegistry:
@@ -67,29 +77,56 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
 
     # ── Classification ──────────────────────────────────────────────────
     from sklearn.linear_model import LogisticRegression
-    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.ensemble import (
+        ExtraTreesClassifier,
+        HistGradientBoostingClassifier,
+        RandomForestClassifier,
+    )
     from sklearn.svm import SVC
 
     registry.register(ModelSpec(
         name="LogisticRegression", problem_type=ProblemType.CLASSIFICATION,
         factory=LogisticRegression,
-        default_params={"max_iter": 1000, "random_state": seed, "n_jobs": -1},
+        default_params={"max_iter": 1000, "random_state": seed, "n_jobs": -1,
+                        "class_weight": "balanced"},
         search_space={"C": [0.01, 0.1, 1.0, 10.0], "penalty": ["l1", "l2"], "solver": ["liblinear", "saga"]},
         requires_scaling=True, supports_probabilities=True,
     ))
     registry.register(ModelSpec(
         name="RandomForestClassifier", problem_type=ProblemType.CLASSIFICATION,
         factory=RandomForestClassifier,
-        default_params={"n_estimators": 100, "random_state": seed, "n_jobs": -1},
-        search_space={"n_estimators": [50, 100, 200, 300], "max_depth": [5, 10, 20, None], "min_samples_split": [2, 5, 10]},
+        default_params={"n_estimators": 300, "random_state": seed, "n_jobs": -1,
+                        "class_weight": "balanced"},
+        search_space={"n_estimators": [100, 200, 300, 500], "max_depth": [5, 10, 20, None], "min_samples_split": [2, 5, 10]},
         supports_probabilities=True,
     ))
     registry.register(ModelSpec(
         name="SVC", problem_type=ProblemType.CLASSIFICATION,
         factory=SVC,
-        default_params={"random_state": seed, "probability": True, "max_iter": 5000},
+        default_params={"random_state": seed, "probability": True, "max_iter": 5000,
+                        "class_weight": "balanced"},
         search_space={"C": [0.1, 1.0, 10.0], "kernel": ["rbf", "linear"]},
         requires_scaling=True, supports_probabilities=True,
+        max_train_samples=20000,
+    ))
+    registry.register(ModelSpec(
+        name="ExtraTreesClassifier", problem_type=ProblemType.CLASSIFICATION,
+        factory=ExtraTreesClassifier,
+        default_params={"n_estimators": 300, "random_state": seed, "n_jobs": -1,
+                        "class_weight": "balanced"},
+        search_space={"n_estimators": [200, 300, 500], "max_depth": [10, 20, None],
+                      "min_samples_split": [2, 5, 10]},
+        supports_probabilities=True,
+    ))
+    registry.register(ModelSpec(
+        name="HistGradientBoostingClassifier", problem_type=ProblemType.CLASSIFICATION,
+        factory=HistGradientBoostingClassifier,
+        default_params={"random_state": seed, "class_weight": "balanced",
+                        "learning_rate": 0.1, "max_iter": 300, "early_stopping": True,
+                        "validation_fraction": 0.1, "n_iter_no_change": 20},
+        search_space={"learning_rate": [0.03, 0.05, 0.1], "max_iter": [200, 300, 500],
+                      "max_leaf_nodes": [15, 31, 63], "l2_regularization": [0.0, 1.0, 10.0]},
+        supports_probabilities=True,
     ))
 
     try:
@@ -97,10 +134,14 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
         registry.register(ModelSpec(
             name="XGBClassifier", problem_type=ProblemType.CLASSIFICATION,
             factory=XGBClassifier,
-            default_params={"n_estimators": 100, "random_state": seed, "eval_metric": "logloss",
+            default_params={"n_estimators": 300, "random_state": seed, "eval_metric": "aucpr",
                             "use_label_encoder": False, "verbosity": 0, "n_jobs": -1},
-            search_space={"n_estimators": [50, 100, 200], "max_depth": [3, 5, 7], "learning_rate": [0.01, 0.1, 0.3]},
+            search_space={"n_estimators": [100, 200, 300], "max_depth": [3, 5, 7],
+                          "learning_rate": [0.01, 0.05, 0.1, 0.3], "subsample": [0.8, 1.0],
+                          "colsample_bytree": [0.8, 1.0]},
             supports_probabilities=True,
+            imbalance_param="scale_pos_weight",
+            supports_early_stopping=True,
         ))
     except ImportError:
         logger.warning("XGBoost not installed, skipping XGBClassifier")
@@ -110,16 +151,23 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
         registry.register(ModelSpec(
             name="LGBMClassifier", problem_type=ProblemType.CLASSIFICATION,
             factory=LGBMClassifier,
-            default_params={"n_estimators": 100, "random_state": seed, "verbose": -1, "n_jobs": -1},
-            search_space={"n_estimators": [50, 100, 200], "num_leaves": [15, 31, 63], "learning_rate": [0.01, 0.1, 0.3]},
+            default_params={"n_estimators": 300, "random_state": seed, "verbose": -1, "n_jobs": -1,
+                            "class_weight": "balanced"},
+            search_space={"n_estimators": [100, 200, 300], "num_leaves": [15, 31, 63],
+                          "learning_rate": [0.01, 0.05, 0.1, 0.3]},
             supports_probabilities=True,
+            supports_early_stopping=True,
         ))
     except ImportError:
         logger.warning("LightGBM not installed, skipping LGBMClassifier")
 
     # ── Regression ──────────────────────────────────────────────────────
     from sklearn.linear_model import LinearRegression, Ridge
-    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.ensemble import (
+        ExtraTreesRegressor,
+        HistGradientBoostingRegressor,
+        RandomForestRegressor,
+    )
 
     registry.register(ModelSpec(
         name="LinearRegression", problem_type=ProblemType.REGRESSION,
@@ -141,14 +189,29 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
         default_params={"n_estimators": 100, "random_state": seed, "n_jobs": -1},
         search_space={"n_estimators": [50, 100, 200, 300], "max_depth": [5, 10, 20, None], "min_samples_split": [2, 5, 10]},
     ))
+    registry.register(ModelSpec(
+        name="ExtraTreesRegressor", problem_type=ProblemType.REGRESSION,
+        factory=ExtraTreesRegressor,
+        default_params={"n_estimators": 300, "random_state": seed, "n_jobs": -1},
+        search_space={"n_estimators": [200, 300, 500], "max_depth": [10, 20, None], "min_samples_split": [2, 5, 10]},
+    ))
+    registry.register(ModelSpec(
+        name="HistGradientBoostingRegressor", problem_type=ProblemType.REGRESSION,
+        factory=HistGradientBoostingRegressor,
+        default_params={"random_state": seed, "learning_rate": 0.1, "max_iter": 300,
+                        "early_stopping": True, "validation_fraction": 0.1, "n_iter_no_change": 20},
+        search_space={"learning_rate": [0.03, 0.05, 0.1], "max_iter": [200, 300, 500],
+                      "max_leaf_nodes": [15, 31, 63], "l2_regularization": [0.0, 1.0, 10.0]},
+    ))
 
     try:
         from xgboost import XGBRegressor
         registry.register(ModelSpec(
             name="XGBRegressor", problem_type=ProblemType.REGRESSION,
             factory=XGBRegressor,
-            default_params={"n_estimators": 100, "random_state": seed, "verbosity": 0, "n_jobs": -1},
-            search_space={"n_estimators": [50, 100, 200], "max_depth": [3, 5, 7], "learning_rate": [0.01, 0.1, 0.3]},
+            default_params={"n_estimators": 300, "random_state": seed, "verbosity": 0, "n_jobs": -1},
+            search_space={"n_estimators": [100, 200, 300], "max_depth": [3, 5, 7], "learning_rate": [0.01, 0.05, 0.1, 0.3]},
+            supports_early_stopping=True,
         ))
     except ImportError:
         logger.warning("XGBoost not installed, skipping XGBRegressor")
@@ -158,8 +221,9 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
         registry.register(ModelSpec(
             name="LGBMRegressor", problem_type=ProblemType.REGRESSION,
             factory=LGBMRegressor,
-            default_params={"n_estimators": 100, "random_state": seed, "verbose": -1, "n_jobs": -1},
-            search_space={"n_estimators": [50, 100, 200], "num_leaves": [15, 31, 63], "learning_rate": [0.01, 0.1, 0.3]},
+            default_params={"n_estimators": 300, "random_state": seed, "verbose": -1, "n_jobs": -1},
+            search_space={"n_estimators": [100, 200, 300], "num_leaves": [15, 31, 63], "learning_rate": [0.01, 0.05, 0.1, 0.3]},
+            supports_early_stopping=True,
         ))
     except ImportError:
         logger.warning("LightGBM not installed, skipping LGBMRegressor")
@@ -191,3 +255,85 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
 
     logger.info(f"Model registry built with {len(registry._registry)} models")
     return registry
+
+
+def fit_model(
+    model: Any,
+    spec: ModelSpec,
+    X_train: Any,
+    y_train: Any,
+    eval_X: Any = None,
+    eval_y: Any = None,
+    early_stopping_rounds: int = 50,
+    max_estimators: int = 2000,
+) -> Any:
+    """Fit ``model``, using early stopping for gradient boosters when a validation
+    set is supplied.
+
+    For XGBoost/LightGBM this raises ``n_estimators`` to ``max_estimators`` and
+    stops once the validation metric plateaus — empirically more accurate than a
+    fixed tree count (it trains more where it helps, and not where it overfits).
+    All other estimators get a plain ``fit``. Falls back to plain ``fit`` if the
+    early-stopping call errors for any reason.
+    """
+    if spec.supports_early_stopping and eval_X is not None and len(eval_X) > 0:
+        module = type(model).__module__
+        try:
+            if module.startswith("xgboost"):
+                model.set_params(n_estimators=max_estimators, early_stopping_rounds=early_stopping_rounds)
+                model.fit(X_train, y_train, eval_set=[(eval_X, eval_y)], verbose=False)
+                return model
+            if module.startswith("lightgbm"):
+                from lightgbm import early_stopping as _lgb_early_stopping
+
+                eval_metric = "average_precision" if hasattr(model, "predict_proba") else "rmse"
+                model.set_params(n_estimators=max_estimators)
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(eval_X, eval_y)], eval_metric=eval_metric,
+                    callbacks=[_lgb_early_stopping(early_stopping_rounds, verbose=False)],
+                )
+                return model
+        except Exception as e:  # noqa: BLE001 — never let tuning of one model kill the run
+            logger.warning(f"Early-stopping fit failed for {spec.name} ({e}); using plain fit")
+    model.fit(X_train, y_train)
+    return model
+
+
+def get_fitted_n_estimators(model: Any) -> Optional[int]:
+    """Best-effort actual tree count after (possibly early-stopped) fitting."""
+    bi = getattr(model, "best_iteration", None)
+    if bi is not None:
+        return int(bi) + 1
+    bi = getattr(model, "best_iteration_", None)  # lightgbm
+    if bi is not None:
+        return int(bi)
+    return getattr(model, "n_estimators", None)
+
+
+def apply_imbalance_handling(model: Any, spec: ModelSpec, y_train: Any) -> Any:
+    """Inject data-dependent class-imbalance parameters into a model instance.
+
+    Models exposing ``class_weight`` already carry ``class_weight="balanced"`` via
+    their default params. Tree-boosters like XGBoost instead need a numeric
+    ``scale_pos_weight`` (= n_negative / n_positive) computed from the training
+    labels — this is set here just before fitting. Multiclass targets are left
+    untouched. Returns the same model for convenience.
+    """
+    if not spec.imbalance_param:
+        return model
+    import numpy as np
+
+    y = np.asarray(y_train)
+    classes, counts = np.unique(y, return_counts=True)
+    if len(classes) != 2:
+        return model
+    neg, pos = float(counts[0]), float(counts[1])
+    if pos <= 0:
+        return model
+    try:
+        model.set_params(**{spec.imbalance_param: neg / pos})
+        logger.debug(f"Set {spec.imbalance_param}={neg / pos:.3f} for imbalance handling")
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Could not set {spec.imbalance_param}: {e}")
+    return model
