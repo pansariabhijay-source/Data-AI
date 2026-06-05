@@ -47,6 +47,32 @@ def test_detect_leakage():
     assert "feat" in leaked
 
 
+def test_detect_leakage_binary_string_target():
+    """Thresholded leakage (corr well below 0.95 but perfect single-feature ranking)
+    must be caught for a non-numeric classification target — the old corr-only check
+    silently missed this (e.g. weather's RISK_MM -> RainTomorrow)."""
+    rng = np.random.RandomState(0)
+    amount = rng.uniform(0, 10, 400)
+    target = np.where(amount > 1.0, "Yes", "No")  # target is a threshold of `amount`
+    df = pd.DataFrame({
+        "amount": amount,                       # perfect ranker -> leakage
+        "noise": rng.normal(size=400),          # unrelated
+        "target": target,
+    })
+    leaked = detect_target_leakage(df, "target")
+    assert "amount" in leaked
+    assert "noise" not in leaked
+
+
+def test_detect_leakage_does_not_flag_moderate_predictor():
+    """A genuinely strong-but-not-perfect feature must not be stripped as leakage."""
+    rng = np.random.RandomState(1)
+    y = rng.randint(0, 2, 500)
+    feat = y + rng.normal(0, 0.6, 500)  # informative but noisy (AUC well under 0.999)
+    df = pd.DataFrame({"feat": feat, "target": y})
+    assert "feat" not in detect_target_leakage(df, "target")
+
+
 def test_detect_imbalance():
     s = pd.Series([0] * 95 + [1] * 5)
     result = detect_class_imbalance(s)

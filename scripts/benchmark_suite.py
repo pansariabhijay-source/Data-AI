@@ -119,6 +119,11 @@ def run_case(case: DatasetCase, settings, improve: bool) -> CaseResult:
         res.seconds = time.perf_counter() - t0
         return res
 
+    # When tuning ran, the champion may have changed after training scored the
+    # test split — re-score so the reported metrics reflect the tuned model.
+    if improve:
+        _rescore_test(state)
+
     res.seconds = time.perf_counter() - t0
     res.problem_type = state.problem_type
     res.best_model = state.best_model_name
@@ -132,6 +137,38 @@ def run_case(case: DatasetCase, settings, improve: bool) -> CaseResult:
     # don't fill the disk.
     _cleanup_run(state, settings)
     return res
+
+
+def _rescore_test(state: PipelineState) -> None:
+    """Re-evaluate the current champion on the held-out test split (post-tuning)."""
+    import joblib
+    import numpy as np
+    import pandas as pd
+    from core.constants import ProblemType
+    from core.metrics import compute_metrics, positive_class_proba
+
+    pt = ProblemType(state.problem_type) if state.problem_type else None
+    if not state.test_path or not state.best_model_path or pt in (None, ProblemType.CLUSTERING):
+        return
+    try:
+        test_df = pd.read_csv(state.test_path, low_memory=False)
+        target = state.target_column
+        if not target or target not in test_df.columns:
+            return
+        X = test_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+        y = test_df[target].values
+        model = joblib.load(state.best_model_path)
+        y_prob = model.predict_proba(X) if hasattr(model, "predict_proba") else None
+        if (pt == ProblemType.CLASSIFICATION and y_prob is not None
+                and state.best_threshold is not None and len(np.unique(y)) == 2):
+            classes = np.asarray(getattr(model, "classes_", [0, 1]))
+            pos = positive_class_proba(y_prob)
+            preds = np.where(pos >= state.best_threshold, classes[1], classes[0])
+        else:
+            preds = model.predict(X)
+        state.test_metrics = compute_metrics(y, preds, pt, y_prob)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _cleanup_run(state: PipelineState, settings) -> None:

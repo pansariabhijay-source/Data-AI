@@ -12,7 +12,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import joblib
 import numpy as np
@@ -27,9 +27,9 @@ from core.metrics import (
     compute_metrics,
     confusion_counts,
     get_primary_metric,
-    is_metric_higher_better,
     positive_class_proba,
     predict_with_optimal_threshold,
+    selection_score,
 )
 from core.model_registry import (
     ModelRegistry,
@@ -142,18 +142,20 @@ class ModelTrainingService:
     def _build_ensemble(
         self, results: list[ModelResult], X_train: np.ndarray, y_train: np.ndarray,
         X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
-        artifact_dir: Path, primary_metric: str, higher_better: bool, top_k: int = 3,
+        artifact_dir: Path, score_of: Callable[[ModelResult], float],
+        n_classes: int, top_k: int = 3,
     ) -> Optional[ModelResult]:
-        """Average the probabilities of the top-K classifiers into a soft-voting ensemble."""
+        """Average the probabilities of the top-K classifiers into a soft-voting ensemble.
+
+        Members are ranked (and weighted) by the same selection score used to crown
+        the champion, so the ensemble is assembled from the strongest generalizers.
+        """
         if problem_type != ProblemType.CLASSIFICATION:
             return None
 
-        # Rank trained, probability-capable members by their validation metric.
-        candidates = [
-            r for r in results
-            if r.status == "trained" and r.model_path and primary_metric in r.metrics
-        ]
-        candidates.sort(key=lambda r: r.metrics[primary_metric], reverse=higher_better)
+        # Rank trained, probability-capable members by the selection score.
+        candidates = [r for r in results if r.status == "trained" and r.model_path]
+        candidates.sort(key=score_of, reverse=True)
 
         members, names, weights = [], [], []
         ref_classes = None
@@ -171,7 +173,7 @@ class ModelTrainingService:
                     continue  # incompatible label ordering — skip
                 members.append(est)
                 names.append(r.model_name)
-                weights.append(max(r.metrics[primary_metric], 1e-3))
+                weights.append(max(score_of(r), 1e-3))
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Ensemble: could not load {r.model_name}: {e}")
 
@@ -199,7 +201,8 @@ class ModelTrainingService:
             model_path = artifact_dir / "VotingEnsemble.joblib"
             joblib.dump(ens, model_path)
             elapsed = round(time.perf_counter() - start, 3)
-            logger.info(f"VotingEnsemble({'+'.join(names)}): {primary_metric}={metrics.get(primary_metric, 0):.4f}")
+            logger.info(f"VotingEnsemble({'+'.join(names)}): f1={metrics.get('f1', 0):.4f} "
+                        f"sel_score={selection_score(metrics, problem_type, n_classes):.4f}")
             return ModelResult(
                 model_name="VotingEnsemble", model_type=problem_type.value,
                 metrics=metrics, train_metrics=train_metrics,
@@ -323,12 +326,19 @@ class ModelTrainingService:
                 ))
 
         primary_metric = get_primary_metric(problem_type)
-        higher_better = is_metric_higher_better(primary_metric)
+
+        # The champion is selected on a more stable, threshold-independent score than
+        # the reported F1 (see core.metrics.selection_score) — for binary
+        # classification F1@single-split-threshold over-fits the validation split and
+        # can crown a worse-generalizing model.
+        n_classes = int(len(np.unique(y_train))) if problem_type != ProblemType.CLUSTERING else 0
+        score_of = lambda r: selection_score(r.metrics, problem_type, n_classes)
 
         # Build a soft-voting ensemble from the strongest classifiers — frequently
         # beats any single model by averaging out their individual errors.
         ensemble = self._build_ensemble(
-            results, X_train, y_train, X_val, y_val, problem_type, artifact_dir, primary_metric, higher_better,
+            results, X_train, y_train, X_val, y_val, problem_type, artifact_dir,
+            score_of, n_classes,
         )
         if ensemble is not None:
             results.append(ensemble)
@@ -337,7 +347,7 @@ class ModelTrainingService:
         trained = [r for r in results if r.status == "trained" and primary_metric in r.metrics]
 
         if trained:
-            best = max(trained, key=lambda r: r.metrics[primary_metric]) if higher_better else min(trained, key=lambda r: r.metrics[primary_metric])
+            best = max(trained, key=score_of)
             best.is_best = True
             state.best_model_name = best.model_name
             state.best_model_path = best.model_path
@@ -345,7 +355,7 @@ class ModelTrainingService:
             state.best_metric_value = best.metrics[primary_metric]
             state.best_threshold = best.decision_threshold
             thr_note = f", threshold={best.decision_threshold:.4f}" if best.decision_threshold is not None else ""
-            logger.info(f"Best model: {best.model_name} ({primary_metric}={best.metrics[primary_metric]:.4f}{thr_note})")
+            logger.info(f"Best model: {best.model_name} ({primary_metric}={best.metrics[primary_metric]:.4f}{thr_note}, sel_score={score_of(best):.4f})")
 
             # Honest held-out evaluation of the champion on the untouched test set.
             self._evaluate_on_test(state, settings, problem_type, target)

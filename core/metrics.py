@@ -173,10 +173,36 @@ def predict_with_optimal_threshold(
 
 
 def get_primary_metric(problem_type: ProblemType) -> str:
-    """Return the primary metric name used for model comparison."""
+    """Return the primary metric name used for reporting and comparison."""
     return {"classification": "f1", "regression": "r2", "clustering": "silhouette_score"}.get(
         problem_type.value, "f1"
     )
+
+
+def selection_score(
+    metrics: dict[str, float], problem_type: ProblemType, n_classes: Optional[int] = None
+) -> float:
+    """Higher-is-better scalar used to *select* the champion (not what's reported).
+
+    For binary classification this is the mean of the available threshold-independent
+    ranking metrics (PR-AUC and ROC-AUC) rather than F1 at a threshold tuned on a
+    single validation split. Thresholded F1 over-fits that split and can crown a
+    model that ranks worse on held-out data; averaging two complementary ranking
+    metrics is minority-focused *and* lowers selection variance. The reported F1 and
+    the F1-optimal decision threshold are unchanged — only which model wins. Falls
+    back to F1 when ranking metrics are unavailable.
+    """
+    if problem_type == ProblemType.CLASSIFICATION:
+        if n_classes == 2:
+            ranking = [metrics[k] for k in ("pr_auc", "roc_auc") if k in metrics]
+            if ranking:
+                return float(np.mean(ranking))
+        return float(metrics.get("f1", 0.0))
+    if problem_type == ProblemType.REGRESSION:
+        return float(metrics.get("r2", -1e18))
+    if problem_type == ProblemType.CLUSTERING:
+        return float(metrics.get("silhouette_score", -1e18))
+    return float(metrics.get("f1", 0.0))
 
 
 def is_metric_higher_better(metric_name: str) -> bool:

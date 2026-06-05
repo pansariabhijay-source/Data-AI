@@ -14,6 +14,7 @@ from core.metrics import (
     is_metric_higher_better,
     positive_class_proba,
     predict_with_optimal_threshold,
+    selection_score,
 )
 
 
@@ -106,3 +107,32 @@ def test_predict_with_optimal_threshold_maps_labels():
     assert 0.0 <= thr <= 1.0
     # The two genuine positives should be recovered at the tuned threshold.
     assert preds[2] == 1 and preds[3] == 1
+
+
+def test_selection_score_binary_uses_ranking_metrics():
+    """Binary classification selection averages PR-AUC and ROC-AUC, ignoring the
+    threshold-dependent F1 — a model with weaker F1 but stronger ranking wins."""
+    strong_rank = {"f1": 0.70, "pr_auc": 0.90, "roc_auc": 0.95}
+    strong_f1 = {"f1": 0.85, "pr_auc": 0.60, "roc_auc": 0.65}
+    s_rank = selection_score(strong_rank, ProblemType.CLASSIFICATION, n_classes=2)
+    s_f1 = selection_score(strong_f1, ProblemType.CLASSIFICATION, n_classes=2)
+    assert s_rank == pytest.approx(0.925)
+    assert s_rank > s_f1
+
+
+def test_selection_score_binary_falls_back_to_f1():
+    """Without ranking metrics (e.g. a model with no probabilities), fall back to F1."""
+    score = selection_score({"f1": 0.8}, ProblemType.CLASSIFICATION, n_classes=2)
+    assert score == pytest.approx(0.8)
+
+
+def test_selection_score_multiclass_uses_f1():
+    score = selection_score(
+        {"f1": 0.7, "roc_auc": 0.99}, ProblemType.CLASSIFICATION, n_classes=3
+    )
+    assert score == pytest.approx(0.7)
+
+
+def test_selection_score_regression_uses_r2():
+    score = selection_score({"r2": 0.42, "rmse": 3.1}, ProblemType.REGRESSION)
+    assert score == pytest.approx(0.42)

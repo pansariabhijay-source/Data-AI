@@ -50,6 +50,29 @@ def test_detect_clustering_no_target(service, sample_classification_df):
     assert pt == ProblemType.CLUSTERING
 
 
+def test_detect_regression_numeric_target_stored_as_string(service):
+    """A continuous numeric target dirtied by a junk row (object dtype) must still
+    be detected as regression, not a high-cardinality classification."""
+    rng = np.random.RandomState(0)
+    vals = rng.uniform(0, 1000, 500).round(2).astype(object)
+    vals[0] = "JUNK"  # stray non-numeric value from a malformed header/export row
+    df = pd.DataFrame({"feat": rng.normal(size=500), "target": vals})
+    assert service.detect_problem_type(df, "target") == ProblemType.REGRESSION
+
+
+def test_detect_classification_high_cardinality_capped(service):
+    """A numeric target is only classification when it has few distinct values; a
+    many-valued continuous target is regression even at a low unique/row ratio."""
+    rng = np.random.RandomState(1)
+    df = pd.DataFrame({"target": rng.uniform(0, 1, 5000)})  # 5000 distinct floats
+    assert service.detect_problem_type(df, "target") == ProblemType.REGRESSION
+
+
+def test_detect_classification_low_cardinality_integer(service):
+    df = pd.DataFrame({"target": np.array([0, 1, 2, 0, 1, 2, 1, 0] * 50)})
+    assert service.detect_problem_type(df, "target") == ProblemType.CLASSIFICATION
+
+
 def test_profile_dataset(service, sample_classification_df):
     meta = service.profile_dataset(sample_classification_df, "target")
     assert meta.n_rows == 100
