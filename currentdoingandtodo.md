@@ -8,6 +8,17 @@ Newest changes at the top of each section.
 ## ✅ Done (recent)
 
 ### Pipeline / ML
+- **CV-based champion selection — implemented as an OPT-IN** (`agents/training/tools.py`,
+  `_cv_selection_scores`, off by default: `CV_SELECTION_FOLDS=0`). Ranks base
+  models by k-fold CV mean − std-penalty instead of a single noisy val split.
+  **Evidence** (`scripts/cv_selection_experiment.py`, 10 splits × 4 datasets):
+  it only changes the champion when selection is genuinely ambiguous
+  (noisy/low-signal — single-split was 90% stable / 2 champions, CV 100% / 1, and
+  CV generalised slightly better on test); on separable problems it's a no-op,
+  and it never hurt test score. Because it adds per-run fitting cost and only the
+  ambiguous minority benefits, it's **off by default** — enable with
+  `CV_SELECTION_FOLDS=4` when you value selection stability over speed (e.g.
+  fraud with clustered boosting models).
 - **Train on a stratified subsample of large data** (`agents/training/tools.py`,
   `_subsample_for_training`). Candidate models fit on at most `TRAIN_SAMPLE_ROWS`
   rows (default 100k), preserving class ratios and keeping ≥2k rows/class so
@@ -50,12 +61,9 @@ Newest changes at the top of each section.
    pipeline starves uploads/status (the root cause behind "upload takes ages
    while a model trains"). Move heavy fitting to a `ProcessPoolExecutor` /
    subprocess worker. Biggest reliability win; medium-large change.
-2. **CV-based champion selection.** The champion is currently picked on a
-   *single* validation split (`agents/training/tools.py`), so a 0.0002
-   difference (noise) can decide the winner. Use stratified k-fold CV
-   mean±std for selection so the "best model" is stable run-to-run. NOTE: full
-   CV ~5× the fit cost — pair it with the subsample above (CV on the sample) to
-   keep it affordable.
+2. **CV-based champion selection** — DONE as an opt-in (see Done section). If a
+   future fairer test on boosting-clustered datasets shows broad benefit,
+   reconsider flipping `CV_SELECTION_FOLDS` on by default.
 3. **Probability calibration of the champion.** The F1-optimal threshold and any
    probability outputs sit on *uncalibrated* scores. Wrap the champion in
    `CalibratedClassifierCV` (binary classification), re-derive the threshold on
@@ -91,6 +99,8 @@ Newest changes at the top of each section.
 | Env var | Default | Effect |
 |---|---|---|
 | `TRAIN_SAMPLE_ROWS` | 100000 | Cap rows used to fit candidate models (0 = off) |
+| `CV_SELECTION_FOLDS` | 0 | k-fold CV champion selection (0 = off; 4 enables) |
+| `CV_SELECTION_MAX_ROWS` | 40000 | Row cap for CV ranking sample |
 | `MAX_UPLOAD_MB` | 1024 | Upload size cap |
 | `VIZ_SAMPLE_ROWS` | 50000 | Rows used to render upload charts |
 | `ARTIFACT_MAX_RUNS` | 25 | Max run dirs kept |

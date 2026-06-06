@@ -60,6 +60,29 @@ except ValueError:
 # (e.g. fraud positives) never get sampled away.
 _MIN_ROWS_PER_CLASS = 2000
 
+# Champion selection via k-fold cross-validation instead of a single validation
+# split. Rationale: a single split is noisy — a ~0.0002 difference (luck of the
+# draw) can crown a worse-generalising model. CV averages over k partitions so
+# the pick is stable run-to-run.
+#
+# OFF BY DEFAULT (CV_SELECTION_FOLDS=0). The stability experiment
+# (scripts/cv_selection_experiment.py) showed CV only changes the champion when
+# selection is genuinely ambiguous (noisy/low-signal data, e.g. clustered
+# boosting models) — there it's more stable AND slightly better on test; on
+# separable problems it's a no-op. Since it adds real per-run fitting cost,
+# enable it (CV_SELECTION_FOLDS=4) only when you value selection stability over
+# speed. CV runs on a capped sample to bound the extra fitting.
+try:
+    _CV_SELECTION_FOLDS = int(os.environ.get("CV_SELECTION_FOLDS", "0"))
+except ValueError:
+    _CV_SELECTION_FOLDS = 0
+try:
+    _CV_SELECTION_MAX_ROWS = int(os.environ.get("CV_SELECTION_MAX_ROWS", "40000"))
+except ValueError:
+    _CV_SELECTION_MAX_ROWS = 40000
+# Prefer models with a higher mean but also lower fold-to-fold variance.
+_CV_STD_PENALTY = 0.25
+
 
 def _subsample_for_training(
     X: np.ndarray, y: np.ndarray, problem_type: ProblemType, seed: int,
@@ -200,6 +223,68 @@ class ModelTrainingService:
                 status="failed",
                 hyperparameters=spec.default_params,
             )
+
+    def _cv_selection_scores(
+        self, specs: list[ModelSpec], X: np.ndarray, y: np.ndarray,
+        problem_type: ProblemType, n_classes: int, seed: int, resampled: bool,
+    ) -> dict[str, tuple[float, float]]:
+        """Cross-validate each base model and return ``{name: (mean, std)}``.
+
+        The selection score is threshold-independent (PR-AUC + ROC-AUC based), so
+        no per-fold thresholding is needed. Runs on a capped sample for speed;
+        returns ``{}`` (caller falls back to single-split) when CV is disabled or
+        the data can't support k stratified folds.
+        """
+        folds = _CV_SELECTION_FOLDS
+        if folds < 2 or problem_type == ProblemType.CLUSTERING or len(X) < folds * 10:
+            return {}
+
+        from sklearn.model_selection import KFold, StratifiedKFold
+
+        Xc, yc = _subsample_for_training(X, y, problem_type, seed, cap=_CV_SELECTION_MAX_ROWS)
+
+        if problem_type == ProblemType.CLASSIFICATION:
+            _, counts = np.unique(yc, return_counts=True)
+            if counts.min() < folds:
+                return {}  # too few minority samples for stratified CV
+            splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
+        else:
+            splitter = KFold(n_splits=folds, shuffle=True, random_state=seed)
+
+        scores: dict[str, tuple[float, float]] = {}
+        for spec in specs:
+            fold_scores: list[float] = []
+            for tr_idx, va_idx in splitter.split(Xc, yc):
+                try:
+                    overrides = {}
+                    if resampled and "class_weight" in spec.default_params:
+                        overrides["class_weight"] = None
+                    model = self._registry.create_instance(problem_type, spec.name, overrides or None)
+                    if not resampled:
+                        model = apply_imbalance_handling(model, spec, yc[tr_idx])
+                    model = fit_model(model, spec, Xc[tr_idx], yc[tr_idx])
+                    y_prob = None
+                    if spec.supports_probabilities and hasattr(model, "predict_proba"):
+                        try:
+                            y_prob = model.predict_proba(Xc[va_idx])
+                        except Exception:
+                            y_prob = None
+                    preds = model.predict(Xc[va_idx])
+                    m = compute_metrics(yc[va_idx], preds, problem_type, y_prob)
+                    fold_scores.append(selection_score(m, problem_type, n_classes))
+                except Exception as e:
+                    logger.debug(f"CV fold failed for {spec.name}: {e}")
+                    continue
+            if fold_scores:
+                scores[spec.name] = (float(np.mean(fold_scores)), float(np.std(fold_scores)))
+
+        if scores:
+            ranked = ", ".join(
+                f"{k}={m:.4f}±{s:.3f}"
+                for k, (m, s) in sorted(scores.items(), key=lambda kv: -kv[1][0])
+            )
+            logger.info(f"CV selection ({folds}-fold) scores: {ranked}")
+        return scores
 
     def _build_ensemble(
         self, results: list[ModelResult], X_train: np.ndarray, y_train: np.ndarray,
@@ -425,7 +510,19 @@ class ModelTrainingService:
         # classification F1@single-split-threshold over-fits the validation split and
         # can crown a worse-generalizing model.
         n_classes = int(len(np.unique(y_train))) if problem_type != ProblemType.CLUSTERING else 0
-        score_of = lambda r: selection_score(r.metrics, problem_type, n_classes)
+
+        # Prefer a k-fold CV score (mean − std penalty) over the single-split score
+        # so the champion is stable run-to-run. Models without a CV score (e.g. the
+        # ensemble, built below) fall back to their single-split selection score.
+        cv_scores = self._cv_selection_scores(
+            specs, X_train, y_train, problem_type, n_classes, self._seed, resampled,
+        )
+
+        def score_of(r: ModelResult) -> float:
+            cs = cv_scores.get(r.model_name)
+            if cs is not None:
+                return cs[0] - _CV_STD_PENALTY * cs[1]
+            return selection_score(r.metrics, problem_type, n_classes)
 
         # Build a soft-voting ensemble from the strongest classifiers — frequently
         # beats any single model by averaging out their individual errors.
