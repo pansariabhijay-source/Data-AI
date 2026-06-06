@@ -895,15 +895,48 @@ async def get_report_pdf(run_id: str, user: User = Depends(get_current_user)):
 
 
 @app.get("/api/report/{run_id}/notebook")
-async def get_report_notebook(run_id: str, user: User = Depends(get_current_user)):
-    """Export the run as a Jupyter notebook (.ipynb): report narrative + charts +
-    runnable code to load the trained champion and score new data."""
+async def get_report_notebook(
+    run_id: str,
+    kind: str = Query("report"),
+    user: User = Depends(get_current_user),
+):
+    """Export the run as a Jupyter notebook (.ipynb).
+
+    kind="report" (default): report narrative + charts + code to load the champion.
+    kind="reproduce": a standalone notebook that re-runs Axiom's actual pipeline
+    agent-by-agent to reproduce the result from scratch.
+    """
     run = _require_run(run_id, user)
     if run["status"] not in ("completed", "failed"):
         raise HTTPException(status_code=400, detail="Pipeline is still running")
 
     result = run.get("result") or {}
     visualizations = run.get("visualizations") or []
+
+    if kind == "reproduce":
+        data_path = run.get("data_path")
+        target = run.get("target_column")
+
+        def _build_repro() -> bytes:
+            from visualization.notebook_report import build_reproduction_notebook
+            return build_reproduction_notebook(
+                run_info={"run_id": run_id, "mode": run.get("mode", "free")},
+                result=result, data_path=data_path, target=target,
+            )
+
+        try:
+            nb_bytes = await run_in_threadpool(_build_repro)
+        except Exception as e:
+            logger.exception("Reproduction notebook generation failed")
+            raise HTTPException(status_code=500, detail=f"Notebook generation failed: {e}")
+
+        from fastapi.responses import StreamingResponse
+        filename = f"axiom-reproduce-{run_id[:8]}.ipynb"
+        return StreamingResponse(
+            iter([nb_bytes]),
+            media_type="application/x-ipynb+json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     shap_data: Optional[dict] = None
     shap_path = Path("artifacts") / run_id / "shap_importance.json"

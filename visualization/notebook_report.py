@@ -152,6 +152,10 @@ def build_notebook(
     cells.append(_md("## Explore the dataset"))
     cells.append(_code(_eda_code(result)))
 
+    return _wrap(cells, run_id)
+
+
+def _wrap(cells: list[dict], run_id: str) -> bytes:
     notebook = {
         "cells": cells,
         "metadata": {
@@ -165,3 +169,124 @@ def build_notebook(
         "nbformat_minor": 4,
     }
     return json.dumps(notebook, indent=1).encode("utf-8")
+
+
+# ── True reproduction notebook ───────────────────────────────────────────────
+
+# (agent_name, section title, what it does) in execution order.
+_AGENT_STEPS = [
+    ("data_collection", "Data Collection",
+     "Load & profile the dataset, detect the problem type, and flag target leakage."),
+    ("preprocessing", "Preprocessing",
+     "Drop duplicates, impute missing values (and add `<col>__was_missing` indicator "
+     "features), handle outliers, and fix dtypes."),
+    ("feature_engineering", "Feature Engineering",
+     "Encode categoricals (one-hot / frequency), extract datetime parts, scale, drop "
+     "low-variance / correlated / **leaky** columns, and select the top features by "
+     "mutual information."),
+    ("data_splitting", "Data Splitting",
+     "Stratified train / validation / test split."),
+    ("model_training", "Model Training",
+     "Train the model zoo, build a soft-voting ensemble, pick the champion by a "
+     "composite score, calibrate its probabilities, and tune the decision threshold."),
+    ("error_detection", "Error Detection",
+     "Audit for overfitting, leakage, and class imbalance."),
+    ("improvement", "Improvement",
+     "Optionally tune the champion's hyperparameters (kept only if it beats the champion)."),
+    ("finalization", "Finalization",
+     "SHAP explanations, the markdown report, and saved artifacts."),
+]
+
+_INSPECT = {
+    "data_collection": "print('problem type :', state.problem_type)\n"
+                       "print('leakage flags :', state.data_quality_flags.get('potential_leakage'))",
+    "preprocessing": "print(state.preprocessing_summary)",
+    "feature_engineering": "print('selected features:', state.selected_features)",
+    "model_training": (
+        "for m in sorted(state.model_results, key=lambda r: (r.metrics or {}).get(state.best_metric_name, 0), reverse=True):\n"
+        "    star = '*' if m.is_best else ' '\n"
+        "    print(f\"{star} {m.model_name:32s} {m.metrics}\")\n"
+        "print('\\nCHAMPION:', state.best_model_name, '|', state.best_metric_name, '=', state.best_metric_value,\n"
+        "      '| threshold =', state.best_threshold)"
+    ),
+}
+
+
+def build_reproduction_notebook(
+    run_info: dict,
+    result: dict,
+    data_path: Optional[str],
+    target: Optional[str],
+) -> bytes:
+    """A standalone notebook that re-runs Axiom's *actual* pipeline, agent by agent.
+
+    Because it calls the real agent code with a fixed seed, running it on the same
+    dataset reproduces the same champion and honest score — including the
+    automatic leakage handling — rather than a hand-written approximation that
+    could drift from the pipeline.
+    """
+    run_id = run_info.get("run_id") or "run"
+    cells: list[dict] = []
+
+    best = result.get("best_model") or "the champion"
+    metric = result.get("best_metric_name") or "score"
+    metric_val = _fmt(result.get("best_metric_value"))
+
+    cells.append(_md(
+        f"# Reproduce: Axiom run `{run_id}`\n\n"
+        f"This notebook **re-runs Axiom's exact pipeline** on your dataset, one agent at "
+        f"a time, so you can reproduce and inspect every step. It calls the real agent "
+        f"code (not a re-implementation), with a fixed random seed — so it reproduces "
+        f"the same champion (**{best}**, {metric.upper()} ≈ {metric_val}) and the same "
+        f"automatic leakage handling.\n\n"
+        f"> **Run this from the Axiom project root** (so `core` and `agents` import). "
+        f"Set `DATA_PATH` to the dataset you uploaded."
+    ))
+
+    safe_path = (data_path or "data/uploads/your_dataset.csv").replace("\\", "/")
+    tgt = repr(target) if target else "None  # set your target column, or None for clustering"
+    cells.append(_code(
+        "import sys, os\n"
+        "# Run from the Axiom project root so these imports resolve:\n"
+        "from core.config import load_settings\n"
+        "from core.state import PipelineState\n"
+        "from core.agent_runner import run_single_agent\n"
+        "from core.utils import get_timestamp\n\n"
+        f'DATA_PATH = r"{safe_path}"\n'
+        f"TARGET    = {tgt}\n\n"
+        "settings = load_settings()\n"
+        "state = PipelineState(\n"
+        '    run_id="reproduction",\n'
+        "    raw_data_path=DATA_PATH,\n"
+        "    target_column=TARGET,\n"
+        "    max_retries=settings.pipeline.max_retries,\n"
+        "    started_at=get_timestamp(),\n"
+        ")\n"
+        "print('Reproducing on', DATA_PATH, '| target =', TARGET)"
+    ))
+
+    for i, (agent, title, desc) in enumerate(_AGENT_STEPS, 1):
+        cells.append(_md(f"## {i}. {title}\n\n{desc}"))
+        code = (
+            f'out = run_single_agent("{agent}", state, settings)\n'
+            f"print('{agent}:', out.status, f'({{out.duration_seconds:.1f}}s)' if out.duration_seconds else '')\n"
+        )
+        if agent in _INSPECT:
+            code += _INSPECT[agent]
+        cells.append(_code(code))
+
+    cells.append(_md(
+        "## Result\n\n"
+        "The champion and honest metrics below should match the report. Note that any "
+        "columns that near-perfectly predict the target (data leakage) were detected and "
+        "dropped automatically — which is why the honest score is realistic rather than "
+        "the inflated ~99% a naive model that keeps them would report."
+    ))
+    cells.append(_code(
+        "print('Champion model :', state.best_model_name)\n"
+        "print('Honest metric  :', state.best_metric_name, '=', state.best_metric_value)\n"
+        "print('Test metrics   :', getattr(state, 'test_metrics', None))\n"
+        "print('Dropped leakage:', state.data_quality_flags.get('potential_leakage'))"
+    ))
+
+    return _wrap(cells, run_id)

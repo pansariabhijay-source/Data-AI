@@ -314,9 +314,17 @@ export async function downloadReportPdf(runId: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-/** Download the run as a Jupyter notebook (.ipynb): report + charts + code. */
-export async function downloadReportNotebook(runId: string): Promise<void> {
-  const res = await authFetch(`${API_BASE}/report/${runId}/notebook`);
+/**
+ * Download the run as a Jupyter notebook (.ipynb).
+ * - "report": narrative + charts + code to load the champion (shareable).
+ * - "reproduce": standalone notebook that re-runs Axiom's actual pipeline to
+ *   reproduce the result from scratch.
+ */
+export async function downloadReportNotebook(
+  runId: string,
+  kind: "report" | "reproduce" = "report",
+): Promise<void> {
+  const res = await authFetch(`${API_BASE}/report/${runId}/notebook?kind=${kind}`);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { detail?: string }).detail || "Notebook download failed");
@@ -325,7 +333,7 @@ export async function downloadReportNotebook(runId: string): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `axiom-report-${runId.slice(0, 8)}.ipynb`;
+  a.download = `axiom-${kind === "reproduce" ? "reproduce" : "report"}-${runId.slice(0, 8)}.ipynb`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

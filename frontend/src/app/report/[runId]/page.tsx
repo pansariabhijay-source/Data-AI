@@ -190,13 +190,13 @@ export default function ReportPage({
     finally { setPdfBusy(false); }
   }, [runId]);
 
-  const [nbBusy, setNbBusy] = useState(false);
-  const handleDownloadNotebook = useCallback(async () => {
-    setNbBusy(true);
+  const [nbBusy, setNbBusy] = useState<"" | "report" | "reproduce">("");
+  const handleDownloadNotebook = useCallback(async (kind: "report" | "reproduce") => {
+    setNbBusy(kind);
     setPdfError(null);
-    try { await downloadReportNotebook(runId); }
+    try { await downloadReportNotebook(runId, kind); }
     catch (e: unknown) { setPdfError(e instanceof Error ? e.message : "Notebook download failed"); }
-    finally { setNbBusy(false); }
+    finally { setNbBusy(""); }
   }, [runId]);
 
   const handleDownloadMd = useCallback(() => {
@@ -337,16 +337,29 @@ export default function ReportPage({
                   Markdown
                 </button>
                 <button
-                  onClick={handleDownloadNotebook}
-                  disabled={nbBusy}
+                  onClick={() => handleDownloadNotebook("report")}
+                  disabled={!!nbBusy}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold bg-white/[0.04] border border-glass-border text-text-secondary hover:bg-white/[0.08] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {nbBusy ? (
+                  {nbBusy === "report" ? (
                     <div className="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-secondary rounded-full animate-spin" />
                   ) : (
                     <FileText size={13} strokeWidth={2} />
                   )}
-                  {nbBusy ? "Building…" : "Notebook"}
+                  {nbBusy === "report" ? "Building…" : "Notebook"}
+                </button>
+                <button
+                  onClick={() => handleDownloadNotebook("reproduce")}
+                  disabled={!!nbBusy}
+                  title="Standalone notebook that re-runs the pipeline to reproduce this result"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold bg-white/[0.04] border border-glass-border text-text-secondary hover:bg-white/[0.08] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {nbBusy === "reproduce" ? (
+                    <div className="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-secondary rounded-full animate-spin" />
+                  ) : (
+                    <RefreshCw size={13} strokeWidth={2} />
+                  )}
+                  {nbBusy === "reproduce" ? "Building…" : "Reproduce"}
                 </button>
                 <button
                   onClick={handleDownloadPdf}

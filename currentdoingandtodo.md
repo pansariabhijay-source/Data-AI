@@ -18,6 +18,15 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Reports / Export
+- **True reproduction notebook** (`build_reproduction_notebook`,
+  `GET /api/report/{run_id}/notebook?kind=reproduce`, "Reproduce" button). A
+  standalone notebook that **re-runs Axiom's actual pipeline agent-by-agent**
+  (`run_single_agent` over the 8 agents on a shared `PipelineState`) on the same
+  dataset — not a re-implementation that could drift. Deterministic seed → it
+  reproduces the same champion, honest score, and leakage handling. Each agent is
+  its own cell with inspection of the resulting state. Verified: the exact
+  sequence runs all 8 agents end-to-end and produces a champion; notebook is
+  strictly valid and every code cell compiles.
 - **Jupyter notebook (.ipynb) export** (`visualization/notebook_report.py`,
   `GET /api/report/{run_id}/notebook`, "Notebook" button on the report + free
   results pages). Exports a run as a self-contained notebook: the report
