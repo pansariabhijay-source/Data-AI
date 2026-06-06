@@ -18,6 +18,18 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Pipeline / ML
+- **Process isolation for the full pipeline** (`core/pipeline_worker.py`,
+  `PIPELINE_ISOLATION`, default ON). `/api/run` now executes the pipeline in a
+  child process (spawn) that streams progress over a `multiprocessing.Queue`; the
+  parent thread blocks on the queue (releasing the GIL) and still owns all
+  run-state/DB persistence — so status/results endpoints are unchanged. Falls
+  back to the in-thread runner (`_run_pipeline_inthread`) if disabled or if spawn
+  fails. Verified end-to-end (all 8 stages, status, results, calibration flow).
+  **Measured** (probe during training): isolated avg 13ms/max 162ms vs thread
+  avg 21ms/max 294ms — a moderate latency win (numpy/sklearn release the GIL), but
+  the real wins are **crash isolation** (a training OOM/segfault kills only the
+  child, not the API), **memory hygiene** (child frees big frames/models on exit),
+  and better tail latency under load. Cost: ~1-2s child spawn per run.
 - **Probability calibration of the champion** (`agents/training/tools.py`,
   `_maybe_calibrate_champion`, `CALIBRATE_CHAMPION`, default ON). Tree ensembles
   /boosters produce miscalibrated probabilities, yet the F1-optimal threshold and
@@ -100,11 +112,9 @@ Newest changes at the top of each section.
 ## 🔜 TODO (prioritized)
 
 ### Tier 1 — highest leverage
-1. **Process isolation for training/tuning.** Training runs in in-process
-   `ThreadPoolExecutor` threads that share the GIL with the API, so a running
-   pipeline starves uploads/status (the root cause behind "upload takes ages
-   while a model trains"). Move heavy fitting to a `ProcessPoolExecutor` /
-   subprocess worker. Biggest reliability win; medium-large change.
+1. **Process isolation for the full pipeline** — DONE (see Done section). Future:
+   extend the same child-process pattern to `/api/workflow/run` (enterprise
+   custom workflows still run in-thread).
 2. **CV-based champion selection** — DONE as an opt-in (see Done section). If a
    future fairer test on boosting-clustered datasets shows broad benefit,
    reconsider flipping `CV_SELECTION_FOLDS` on by default.
@@ -146,6 +156,7 @@ Newest changes at the top of each section.
 | `MI_SAMPLE_ROWS` | 50000 | Rows used for mutual-info feature ranking (0 = off) |
 | `SHAP_KERNEL_NSAMPLES` | 100 | Coalition budget for SHAP KernelExplainer (ensembles/SVC) |
 | `CALIBRATE_CHAMPION` | 1 | Calibrate champion probabilities (0 = off) |
+| `PIPELINE_ISOLATION` | 1 | Run `/api/run` pipeline in a child process (0 = in-thread) |
 | `ARTIFACT_MAX_RUNS` | 25 | Max run dirs kept |
 | `ARTIFACT_MIN_KEEP` | 5 | Always-kept newest runs |
 | `ARTIFACT_RETENTION_DAYS` | 30 | Age cap for runs/uploads |

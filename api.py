@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import multiprocessing
 import os
 import sys
 import shutil
@@ -23,6 +24,7 @@ import threading
 import traceback
 import time
 from pathlib import Path
+from queue import Empty
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -44,6 +46,7 @@ from core.config import load_settings
 from core.logging_config import setup_logging, get_logger
 from core.state import PipelineState
 from core.utils import generate_run_id, get_timestamp, ensure_directory
+from core.pipeline_worker import build_result_payload, run_pipeline_child
 from database import get_db, User, UserSession, PromptHistory, UserPreference, SessionLocal
 
 logger = get_logger("api")
@@ -174,6 +177,18 @@ try:
     _VIZ_SAMPLE_ROWS = int(os.environ.get("VIZ_SAMPLE_ROWS", "50000"))
 except ValueError:
     _VIZ_SAMPLE_ROWS = 50000
+
+# Run the full pipeline in a child PROCESS (default) so its CPU-heavy work never
+# holds the API's GIL — uploads/status stay responsive while a pipeline runs.
+# Set PIPELINE_ISOLATION=0 to fall back to the in-thread runner. The "spawn"
+# context is used for cross-platform consistency (and is the only option on
+# Windows). Spawning the child re-imports core.pipeline_worker (not this module),
+# so the child never starts a web server.
+try:
+    _PIPELINE_ISOLATION = int(os.environ.get("PIPELINE_ISOLATION", "1"))
+except ValueError:
+    _PIPELINE_ISOLATION = 1
+_MP_CTX = multiprocessing.get_context("spawn")
 
 
 def _run_state_path(run_id: str) -> Path:
@@ -1065,7 +1080,137 @@ async def generate_visualization_endpoint(
 def _run_pipeline_background(
     run_id: str, data_path: str, target_column: Optional[str], mode: str = "free"
 ) -> None:
-    """Execute the full pipeline in a background thread."""
+    """Dispatch a full pipeline run.
+
+    Prefers an isolated child process (so training never starves the API); falls
+    back to the in-thread runner if process isolation is disabled or the worker
+    can't be spawned. Either way this is invoked from a daemon thread, so it may
+    block.
+    """
+    if _PIPELINE_ISOLATION:
+        proc = None
+        try:
+            event_q = _MP_CTX.Queue()
+            proc = _MP_CTX.Process(
+                target=run_pipeline_child,
+                args=(event_q, run_id, data_path, target_column, mode),
+                daemon=True,
+            )
+            proc.start()  # spawn failures surface here -> fall back, nothing ran yet
+        except Exception:
+            logger.exception("Failed to spawn pipeline worker; falling back to in-thread")
+            proc = None
+        if proc is not None:
+            _consume_pipeline_events(run_id, event_q, proc)
+            _run_artifact_cleanup()
+            return
+
+    _run_pipeline_inthread(run_id, data_path, target_column, mode)
+    _run_artifact_cleanup()
+
+
+def _consume_pipeline_events(run_id: str, event_q, proc) -> None:
+    """Drain progress events from the worker process into the run's state.
+
+    Blocking on ``event_q.get`` releases the GIL, so the API event loop stays
+    responsive while the child does the CPU-heavy work. The parent owns all
+    run-dict / disk / DB persistence (unchanged from the in-thread path).
+    """
+    run = _active_runs[run_id]
+    run["status"] = "running"
+    run["logs"].append({"time": get_timestamp(), "msg": "Pipeline starting (isolated process)..."})
+    _persist_run(run_id)
+
+    done_payload: Optional[dict] = None
+    error_info: Optional[tuple] = None
+    while True:
+        try:
+            evt = event_q.get(timeout=5)
+        except Empty:
+            if not proc.is_alive():
+                break  # child died without a terminal event
+            continue
+
+        kind = evt[0]
+        if kind == "start":
+            _, agent, ts = evt
+            run["current_stage"] = agent
+            run["logs"].append({"time": ts, "msg": f"Starting {agent}..."})
+            _persist_run(run_id)
+        elif kind == "complete":
+            _, agent, out, ts = evt
+            run["agent_outputs"][agent] = out
+            if out.get("status") == "completed":
+                if agent not in run.setdefault("completed_stages", []):
+                    run["completed_stages"].append(agent)
+                dur = out.get("duration_seconds") or 0.0
+                run["logs"].append({"time": ts, "msg": f"✓ {agent} completed ({dur:.1f}s)"})
+            else:
+                run["logs"].append({"time": ts, "msg": f"✗ {agent} failed: {out.get('error') or 'unknown'}"[:200]})
+            _persist_run(run_id)
+        elif kind == "done":
+            done_payload = evt[1]
+        elif kind == "error":
+            error_info = (evt[1], evt[2] if len(evt) > 2 else "")
+        elif kind == "__end__":
+            break
+
+    proc.join(timeout=15)
+    if proc.is_alive():  # safety: don't leak a hung worker
+        proc.terminate()
+
+    _finalize_isolated_run(run_id, done_payload, error_info)
+
+
+def _finalize_isolated_run(run_id: str, done_payload: Optional[dict],
+                           error_info: Optional[tuple]) -> None:
+    """Apply the worker's terminal result to run state + DB (mirrors in-thread)."""
+    run = _active_runs[run_id]
+    run["completed_at"] = get_timestamp()
+
+    if done_payload is not None:
+        failed = done_payload.get("failed", False)
+        run["result"] = done_payload.get("result")
+        for v in done_payload.get("visualizations", []) or []:
+            run.setdefault("visualizations", []).append(v)
+        if failed:
+            run["status"] = "failed"
+            run["error"] = done_payload.get("failure_reason") or "Pipeline failed during execution"
+            run["logs"].append({"time": get_timestamp(), "msg": f"Pipeline failed: {run['error']}"})
+        else:
+            run["status"] = "completed"
+            run["logs"].append({"time": get_timestamp(), "msg": "Pipeline completed successfully!"})
+        db_summary = {
+            "best_model": done_payload.get("best_model_name"),
+            "metric": (f"{done_payload.get('best_metric_name')}={done_payload.get('best_metric_value')}"
+                       if done_payload.get("best_metric_name") else None),
+            "error": done_payload.get("failure_reason") if failed else None,
+        }
+        db_status = "failed" if failed else "completed"
+    else:
+        # Child raised, or died without a terminal event.
+        msg = (error_info[0] if error_info else "Pipeline worker exited unexpectedly")
+        if error_info and error_info[1]:
+            logger.error("Isolated pipeline %s failed:\n%s", run_id, error_info[1])
+        run["status"] = "failed"
+        run["error"] = msg
+        run["logs"].append({"time": get_timestamp(), "msg": f"Pipeline failed: {str(msg)[:300]}"})
+        db_summary = {"error": str(msg)}
+        db_status = "failed"
+
+    with SessionLocal() as db:
+        history = db.query(PromptHistory).filter(PromptHistory.run_id == run_id).first()
+        if history:
+            history.status = db_status
+            history.result_summary = json.dumps(db_summary)
+            db.commit()
+    _persist_run(run_id)
+
+
+def _run_pipeline_inthread(
+    run_id: str, data_path: str, target_column: Optional[str], mode: str = "free"
+) -> None:
+    """Execute the full pipeline in this (background) thread — fallback path."""
     run = _active_runs[run_id]
     run["status"] = "running"
     run["logs"].append({"time": get_timestamp(), "msg": "Pipeline starting..."})
@@ -1172,10 +1317,6 @@ def _run_pipeline_background(
                 history.result_summary = json.dumps({"error": str(e)})
                 db.commit()
         _persist_run(run_id)
-
-    # Enforce the artifact-retention policy now that this run has finished, so
-    # disk usage stays bounded across many runs.
-    _run_artifact_cleanup()
 
 
 def _run_workflow_background(
@@ -1342,64 +1483,9 @@ def _run_single_agent_background(run_id: str, agent_name: str) -> None:
         _persist_run(run_id)
 
 
-def _build_result_payload(state: PipelineState) -> dict:
-    """Build the API result payload from pipeline state."""
-    return {
-        "run_id": state.run_id,
-        "status": "failed" if state.failed else "completed",
-        "error": state.failure_reason if state.failed else None,
-        "problem_type": state.problem_type,
-        "target_column": state.target_column,
-        "best_model": state.best_model_name,
-        "best_metric_name": state.best_metric_name,
-        "best_metric_value": state.best_metric_value,
-        "retry_count": state.retry_count,
-        "dataset": {
-            "rows": state.dataset_metadata.n_rows if state.dataset_metadata else None,
-            "columns": state.dataset_metadata.n_columns if state.dataset_metadata else None,
-            "quality_score": state.data_quality_flags.get("quality_score"),
-        },
-        "preprocessing": {
-            "rows_before": state.preprocessing_summary.rows_before if state.preprocessing_summary else None,
-            "rows_after": state.preprocessing_summary.rows_after if state.preprocessing_summary else None,
-            "quality_score": state.preprocessing_summary.quality_score if state.preprocessing_summary else None,
-            "duplicates_removed": state.preprocessing_summary.duplicates_removed if state.preprocessing_summary else 0,
-        },
-        "features": {
-            "before": state.feature_engineering_summary.n_features_before if state.feature_engineering_summary else None,
-            "after": state.feature_engineering_summary.n_features_after if state.feature_engineering_summary else None,
-            "selected": state.selected_features[:20],
-        },
-        "models": [
-            {
-                "name": r.model_name,
-                "status": r.status,
-                "metrics": r.metrics,
-                "time_s": r.training_time_seconds,
-                "is_best": r.is_best,
-            }
-            for r in state.model_results
-        ],
-        "errors": [
-            {
-                "severity": e.severity,
-                "type": e.error_type,
-                "cause": e.root_cause,
-                "fix": e.recommended_fix,
-            }
-            for e in state.error_reports
-        ],
-        "artifacts": state.artifacts,
-        "reports": state.report_paths,
-        "experiment_history": [
-            {
-                "iteration": e.iteration,
-                "best_model": e.best_model,
-                "best_value": e.best_metric_value,
-            }
-            for e in state.experiment_history
-        ],
-    }
+# The result-payload builder is shared with the out-of-process worker
+# (core.pipeline_worker) so both execution paths produce identical payloads.
+_build_result_payload = build_result_payload
 
 
 @app.get("/api/export/{run_id}/excel")
