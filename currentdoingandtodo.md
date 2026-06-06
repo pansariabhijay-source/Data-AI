@@ -18,6 +18,20 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Pipeline / ML
+- **Frequency encoding for high-cardinality categoricals**
+  (`agents/feature_engineering/tools.py`). High-card columns were *label-encoded*
+  (an arbitrary ordinal models misread as magnitude); now each category maps to
+  its relative frequency — meaningful and leakage-safe (rare device/merchant =
+  predictive in fraud). Proof (`scripts/feature_quality_experiment.py`): on data
+  where rarity predicts the target, test AUC **0.870 → 0.955 (+0.085)**.
+- **Missing-value indicator features** (`agents/preprocessing/tools.py`,
+  `ADD_MISSING_INDICATORS`, default ON). Adds `<col>__was_missing` before
+  imputation, for columns with ≥`MISSING_INDICATOR_MIN_FRAC` nulls (default 1%);
+  downstream selection prunes uninformative ones. Whether a value is missing is
+  often predictive (fraud). Proof: with informative missingness, **linear-model**
+  test AUC **0.716 → 0.891 (+0.175)** (trees gain little — they recover some
+  signal from the median-imputation spike). Verified end-to-end: the indicator
+  was created and selected as a top feature.
 - **Process isolation for the full pipeline** (`core/pipeline_worker.py`,
   `PIPELINE_ISOLATION`, default ON). `/api/run` now executes the pipeline in a
   child process (spawn) that streams progress over a `multiprocessing.Queue`; the
@@ -130,9 +144,8 @@ Newest changes at the top of each section.
    the last bit of accuracy at the cost of one extra fit).
 
 ### Tier 3 — feature & data quality
-6. **Target/frequency encoding** for high-cardinality categoricals (we have
-   500-value columns; one-hot/label loses signal there).
-7. **Missing-indicator features** before imputation (missingness is predictive).
+6. **Frequency encoding** for high-cardinality categoricals — DONE (see Done).
+7. **Missing-indicator features** before imputation — DONE (see Done).
 8. **Richer datetime decomposition** (cyclical hour/day, is_weekend, recency).
 9. **Train/test drift checks** (PSI) in `error_detection`.
 10. **Persist preprocessing + FE as one `sklearn.Pipeline`** for reproducible
@@ -157,6 +170,8 @@ Newest changes at the top of each section.
 | `SHAP_KERNEL_NSAMPLES` | 100 | Coalition budget for SHAP KernelExplainer (ensembles/SVC) |
 | `CALIBRATE_CHAMPION` | 1 | Calibrate champion probabilities (0 = off) |
 | `PIPELINE_ISOLATION` | 1 | Run `/api/run` pipeline in a child process (0 = in-thread) |
+| `ADD_MISSING_INDICATORS` | 1 | Add `<col>__was_missing` features (0 = off) |
+| `MISSING_INDICATOR_MIN_FRAC` | 0.01 | Min null fraction to add an indicator |
 | `ARTIFACT_MAX_RUNS` | 25 | Max run dirs kept |
 | `ARTIFACT_MIN_KEEP` | 5 | Always-kept newest runs |
 | `ARTIFACT_RETENTION_DAYS` | 30 | Age cap for runs/uploads |

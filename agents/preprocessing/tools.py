@@ -7,6 +7,7 @@ Handles: missing values, duplicates, outliers, dtype fixing, high-cardinality de
 from __future__ import annotations
 
 import json
+import os
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,20 @@ from core.utils import ensure_directory, get_memory_usage_mb, optimize_dataframe
 from core.validation import compute_quality_score
 
 logger = get_logger("preprocessing")
+
+# Whether a value is MISSING is often predictive (especially for fraud), but
+# imputation erases that signal. Add a binary `<col>__was_missing` feature before
+# filling, for columns whose null fraction is at least this much. Downstream
+# feature selection drops the indicator if it turns out to be uninformative.
+# Disable with ADD_MISSING_INDICATORS=0.
+try:
+    _ADD_MISSING_INDICATORS = int(os.environ.get("ADD_MISSING_INDICATORS", "1"))
+except ValueError:
+    _ADD_MISSING_INDICATORS = 1
+try:
+    _MISSING_INDICATOR_MIN_FRAC = float(os.environ.get("MISSING_INDICATOR_MIN_FRAC", "0.01"))
+except ValueError:
+    _MISSING_INDICATOR_MIN_FRAC = 0.01
 
 
 class PreprocessingService:
@@ -44,13 +59,17 @@ class PreprocessingService:
         strategies: dict[str, str] = {}
         cols_to_drop: list[str] = []
 
+        # Drop rows with a missing target first, so the row count is stable before
+        # we add any missingness-indicator columns (which must align to df length).
+        if target and target in df.columns:
+            n_before = len(df)
+            df = df.dropna(subset=[target])
+            if len(df) < n_before:
+                strategies[target] = f"dropped {n_before - len(df)} rows with null target"
+
+        n_indicators = 0
         for col in df.columns:
-            if col == target:
-                # Drop rows with missing target
-                n_before = len(df)
-                df = df.dropna(subset=[col])
-                if len(df) < n_before:
-                    strategies[col] = f"dropped {n_before - len(df)} rows with null target"
+            if col == target or col.endswith("__was_missing"):
                 continue
 
             null_pct = df[col].isnull().mean()
@@ -61,6 +80,11 @@ class PreprocessingService:
                 cols_to_drop.append(col)
                 strategies[col] = f"dropped (>{self._config.max_null_threshold:.0%} null)"
                 continue
+
+            # Preserve the missingness signal as a feature before imputing.
+            if _ADD_MISSING_INDICATORS and null_pct >= _MISSING_INDICATOR_MIN_FRAC:
+                df[f"{col}__was_missing"] = df[col].isnull().astype("int8")
+                n_indicators += 1
 
             if pd.api.types.is_numeric_dtype(df[col]):
                 median_val = df[col].median()
@@ -78,6 +102,8 @@ class PreprocessingService:
         if cols_to_drop:
             df = df.drop(columns=cols_to_drop)
             logger.info(f"Dropped {len(cols_to_drop)} high-null columns: {cols_to_drop}")
+        if n_indicators:
+            logger.info(f"Added {n_indicators} missing-value indicator feature(s)")
 
         return df, strategies
 

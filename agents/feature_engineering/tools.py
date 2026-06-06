@@ -64,10 +64,16 @@ class FeatureEngineeringService:
                 encoding_map[col] = f"dropped (ID-like, {nunique} unique)"
                 logger.info(f"Dropped ID-like column '{col}' ({nunique} unique values)")
             else:
-                from sklearn.preprocessing import LabelEncoder
-                le = LabelEncoder()
-                df[col] = le.fit_transform(df[col].astype(str))
-                encoding_map[col] = f"label_encoded ({nunique} categories)"
+                # Frequency-encode high-cardinality columns: map each category to
+                # its relative frequency. Unlike label encoding (which injects an
+                # arbitrary ordinal that models misread as magnitude), this is a
+                # meaningful, leakage-safe signal — rare categories (low frequency)
+                # are often the predictive ones (e.g. a rare device/merchant in
+                # fraud). Selection downstream drops it if uninformative.
+                s = df[col].astype(str)
+                freq = s.map(s.value_counts(normalize=True))
+                df[col] = freq.astype(float).fillna(0.0)
+                encoding_map[col] = f"frequency_encoded ({nunique} categories)"
 
         return df, encoding_map
 
