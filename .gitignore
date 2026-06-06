@@ -28,9 +28,11 @@ data/axiom.db-wal
 data/axiom.db-shm
 data/uploads/
 data/source.db
-artifacts/
-reports/
-logs/
+# Root-anchored so these only ignore the pipeline's OUTPUT dirs, not same-named
+# source folders (e.g. the frontend route frontend/src/app/enterprise/reports/).
+/artifacts/
+/reports/
+/logs/
 
 # ── Frontend ─────────────────────────────────────────────────────────────────
 frontend/node_modules/
