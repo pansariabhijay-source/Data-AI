@@ -303,7 +303,10 @@ def generate_pairplot(df: pd.DataFrame, target: Optional[str] = None, max_featur
 
     plot_df = df[numeric_cols].dropna().head(500)
     if target and target in df.columns and target not in numeric_cols:
-        plot_df[target] = df[target].iloc[plot_df.index]
+        # Align by label (.loc), not position (.iloc): plot_df.index holds the
+        # original row labels, which only coincide with positions for a clean
+        # RangeIndex. On a sampled/filtered df, .iloc[labels] goes out of bounds.
+        plot_df[target] = df.loc[plot_df.index, target]
 
     g = sns.pairplot(
         plot_df, hue=target if target and target in plot_df.columns else None,
@@ -339,7 +342,8 @@ def generate_pca_plot(df: pd.DataFrame, target: Optional[str] = None) -> Optiona
     fig, ax = plt.subplots(figsize=(8, 6))
 
     if target and target in df.columns:
-        labels = df[target].iloc[numeric_df.head(2000).index]
+        # Label-based alignment (.loc); .iloc would break on a non-RangeIndex df.
+        labels = df.loc[numeric_df.head(2000).index, target]
         unique_labels = labels.unique()
         for i, label in enumerate(unique_labels[:10]):
             mask = labels == label

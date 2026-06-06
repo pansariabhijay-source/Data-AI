@@ -204,10 +204,19 @@ def run_single_agent(
         try:
             from pathlib import Path
             if agent_name == "data_collection":
+                import os
                 import pandas as pd
                 from visualization.engine import generate_enterprise_mode_viz
                 if state.raw_data_path and Path(state.raw_data_path).exists():
                     df = pd.read_csv(state.raw_data_path)
+                    # Charts are statistical summaries — render them on a bounded
+                    # sample so viz time stays flat regardless of dataset size.
+                    try:
+                        _cap = int(os.environ.get("VIZ_SAMPLE_ROWS", "50000"))
+                    except ValueError:
+                        _cap = 50000
+                    if _cap > 0 and len(df) > _cap:
+                        df = df.sample(n=_cap, random_state=0)
                     output.visualizations = generate_enterprise_mode_viz(df, state.target_column)
             elif agent_name == "model_training":
                 from visualization.engine import generate_model_comparison, generate_feature_importance

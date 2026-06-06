@@ -7,6 +7,16 @@ Newest changes at the top of each section.
 
 ## ✅ Done (recent)
 
+### Visualizations
+- **Fixed a latent pairplot/PCA bug** (`visualization/engine.py`): they used
+  positional `.iloc[label_index]` to attach the target, which goes
+  out-of-bounds on any non-contiguous index — so on-demand pairplot/PCA *failed*
+  for any dataset >50k rows (the on-demand endpoint samples to 50k). Now uses
+  label-based `.loc`. Verified: both render on a 70k run.
+- **Per-agent viz now renders on a bounded sample** (`core/agent_runner.py`,
+  `VIZ_SAMPLE_ROWS`) so data_collection's chart generation stays flat regardless
+  of dataset size (was re-rendering the free charts on the full frame).
+
 ### Pipeline / ML
 - **CV-based champion selection — implemented as an OPT-IN** (`agents/training/tools.py`,
   `_cv_selection_scores`, off by default: `CV_SELECTION_FOLDS=0`). Ranks base
