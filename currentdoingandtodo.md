@@ -135,6 +135,22 @@ notebook · `65bce31` reports-page clarity · `739778d` gitignore reports-route 
   Built as plain nbformat-v4 JSON (no extra runtime dep); validated with
   `nbformat.validate`. Verified live: 200, valid .ipynb, correct content-type.
 
+### UX / Reproducibility
+- **Per-agent "what it did" surfaced in the live pipeline view**
+  (`app/free/pipeline/[runId]/page.tsx`, `agentFacts`). Each completed stage now
+  shows the real facts from its summary (e.g. "rows after: 200,000 · duplicates
+  removed: 20,000 · features after: 21") instead of a generic description —
+  directly answering the "do the agents actually do anything?" question.
+- **Inference manifest** (`agents/finalization/tools.py` → `inference_manifest.json`).
+  Records exactly what the champion expects — ordered feature list, decision
+  threshold, problem type, target, leakage-dropped columns, model file — so
+  there's no train/serve skew about *which* features in *what* order. Full
+  raw→prediction transform replay is the reproduction notebook (Report →
+  Reproduce). NOTE: a single fitted `sklearn.Pipeline` for online serving was
+  deliberately NOT built — the agents apply transforms imperatively (encoders/
+  scalers aren't fitted-transformers), so that's a large refactor with low ROI
+  for a batch tool whose reproducibility is already covered by the repro notebook.
+
 ### Pipeline / ML
 - **Richer datetime decomposition** (`agents/feature_engineering/tools.py`,
   `extract_datetime_features`). Beyond raw year/month/dow/hour, now adds
@@ -288,13 +304,18 @@ notebook · `65bce31` reports-page clarity · `739778d` gitignore reports-route 
 7. **Missing-indicator features** before imputation — DONE (see Done).
 8. **Richer datetime decomposition** — DONE (see Done).
 9. **Train/test drift checks** (PSI) — DONE (see Done).
-10. **Persist preprocessing + FE as one `sklearn.Pipeline`** for reproducible
-    inference / no train-serve skew.
+10. **Persist preprocessing + FE as one `sklearn.Pipeline`** — PARTIAL/DONE: an
+    inference manifest is written (see Done). A full fitted-transformer pipeline
+    for online serving is deliberately deferred (large refactor, low ROI; repro
+    notebook already gives faithful replay).
 
 ### Tier 4 — observability / UX
-11. **SSE / WebSocket** live logs instead of status polling.
-12. **Surface each agent's "what I did" summary** prominently in the UI (would
-    have pre-empted the "the agents do nothing" confusion).
+11. **SSE / WebSocket live logs** — EVALUATED, deferred. Browser `EventSource`
+    can't send the `Authorization: Bearer` header the app uses, so SSE needs
+    token-in-URL or cookie auth + proxy streaming — real complexity for marginal
+    gain over the 1.5s polling that already works. Revisit only if true real-time
+    streaming becomes a requirement.
+12. **Surface each agent's "what I did" summary** — DONE (see Done).
 
 ---
 

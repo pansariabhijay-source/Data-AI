@@ -25,6 +25,34 @@ const ICONS: Record<AgentId, LucideIcon> = {
 
 type StageState = "done" | "active" | "pending" | "failed";
 
+// A few human-readable facts from an agent's summary — so users see what each
+// stage *actually did* (e.g. "20,000 duplicates removed") instead of a generic
+// description. Picks the most meaningful scalar fields.
+const _FACT_PRIORITY = [
+  "rows_after", "duplicates_removed", "nulls_filled", "outliers_handled",
+  "features_after", "features_created", "encodings_applied",
+  "models_trained", "best_model", "best_metric_value",
+  "issues_found", "problem_type", "rows", "columns",
+];
+function agentFacts(summary?: Record<string, unknown>): string {
+  if (!summary) return "";
+  const fmt = (v: unknown): string | null => {
+    if (v == null || typeof v === "object") return null;
+    if (typeof v === "number") return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(3);
+    return String(v);
+  };
+  const parts: string[] = [];
+  const keys = [..._FACT_PRIORITY.filter((k) => k in summary),
+                ...Object.keys(summary).filter((k) => !_FACT_PRIORITY.includes(k))];
+  for (const k of keys) {
+    const val = fmt(summary[k]);
+    if (val === null || val === "" || val === "0") continue;
+    parts.push(`${k.replace(/_/g, " ")}: ${val}`);
+    if (parts.length >= 3) break;
+  }
+  return parts.join("  ·  ");
+}
+
 export default function FreePipelinePage({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = use(params);
   const router = useRouter();
@@ -186,7 +214,9 @@ export default function FreePipelinePage({ params }: { params: Promise<{ runId: 
                           <div className="text-[12.5px] font-semibold truncate" style={{ color: st === "pending" ? "var(--color-text-ghost)" : st === "done" ? "var(--color-text-secondary)" : meta.color }}>
                             {meta.label}
                           </div>
-                          <div className="text-[10px] text-text-ghost truncate">{meta.description}</div>
+                          <div className="text-[10px] text-text-ghost truncate" title={st === "done" ? agentFacts(ao?.summary) : meta.description}>
+                            {st === "done" && agentFacts(ao?.summary) ? agentFacts(ao?.summary) : meta.description}
+                          </div>
                         </div>
                         {ao?.duration_seconds != null && (
                           <span className="text-[10px] font-mono text-text-ghost shrink-0">{ao.duration_seconds.toFixed(1)}s</span>

@@ -63,6 +63,35 @@ class FinalizationService:
         meta_path.write_text(json.dumps(metadata, indent=2, default=safe_json_serialize), encoding="utf-8")
         state.artifacts["metadata"] = str(meta_path)
 
+        # ── Inference manifest ────────────────────────────────────────────────
+        # Documents exactly what the champion expects so there's no train/serve
+        # skew: the ordered feature list, decision threshold, and which columns
+        # were dropped as leakage. Full raw->prediction transform replay is the
+        # reproduction notebook's job (Report → Reproduce); this records the
+        # contract.
+        fe = state.feature_engineering_summary
+        manifest = {
+            "champion_model": state.best_model_name,
+            "model_file": state.best_model_path,
+            "problem_type": state.problem_type,
+            "target": state.target_column,
+            "decision_threshold": state.best_threshold,
+            "expected_features": list(state.selected_features or []),
+            "n_expected_features": len(state.selected_features or []),
+            "encodings": getattr(fe, "encodings_applied", None) if fe else None,
+            "dropped_as_leakage": state.data_quality_flags.get("potential_leakage") or [],
+            "how_to_use": (
+                "Load `model_file` with joblib. It expects `expected_features` (already "
+                "preprocessed + feature-engineered, in this order). To score RAW new data, "
+                "replay the pipeline transforms — the faithful way is the reproduction "
+                "notebook (Report → Reproduce). Apply `decision_threshold` to "
+                "predict_proba[:,1] for the positive class."
+            ),
+        }
+        manifest_path = run_dir / "inference_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2, default=safe_json_serialize), encoding="utf-8")
+        state.artifacts["inference_manifest"] = str(manifest_path)
+
         # Save all metrics
         metrics_data = [{
             "model": r.model_name, "status": r.status,
