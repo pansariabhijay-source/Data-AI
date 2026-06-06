@@ -124,6 +124,72 @@ class ErrorDetectionService:
             ))
         return errors
 
+    def _check_drift(self, state: PipelineState) -> list[ErrorReport]:
+        """Flag train→test distribution drift via Population Stability Index (PSI).
+
+        High PSI means the test split is distributed differently from train, so the
+        honest test score may not reflect future data (often a sign of a time-based
+        or otherwise non-random split). Diagnostic finding; never blocks the run.
+        Runs on a row-capped sample so it's cheap.
+        """
+        errors: list[ErrorReport] = []
+        if not state.train_path or not state.test_path:
+            return errors
+        try:
+            from pathlib import Path
+            import numpy as np
+            import pandas as pd
+            if not (Path(state.train_path).exists() and Path(state.test_path).exists()):
+                return errors
+
+            cap = 50000
+            tr = pd.read_csv(state.train_path, low_memory=False)
+            te = pd.read_csv(state.test_path, low_memory=False)
+            if len(tr) > cap:
+                tr = tr.sample(cap, random_state=42)
+            if len(te) > cap:
+                te = te.sample(cap, random_state=42)
+            target = state.target_column
+            cols = [c for c in tr.select_dtypes(include=[np.number]).columns
+                    if c != target and c in te.columns]
+
+            def psi(a: pd.Series, b: pd.Series, bins: int = 10) -> float:
+                a, b = a.dropna(), b.dropna()
+                if len(a) < bins or len(b) < bins:
+                    return 0.0
+                edges = np.unique(np.quantile(a, np.linspace(0, 1, bins + 1)))
+                if len(edges) < 3:
+                    return 0.0
+                edges[0], edges[-1] = -np.inf, np.inf
+                eps = 1e-6
+                af = np.clip(np.histogram(a, bins=edges)[0] / len(a), eps, None)
+                bf = np.clip(np.histogram(b, bins=edges)[0] / len(b), eps, None)
+                return float(np.sum((bf - af) * np.log(bf / af)))
+
+            scores: dict[str, float] = {}
+            for c in cols:
+                try:
+                    scores[c] = psi(tr[c], te[c])
+                except Exception:
+                    continue
+            drifted = sorted(((c, p) for c, p in scores.items() if p >= 0.25),
+                             key=lambda x: -x[1])
+            if drifted:
+                top = ", ".join(f"{c} (PSI={p:.2f})" for c, p in drifted[:5])
+                errors.append(ErrorReport(
+                    severity=Severity.LOW.value, stage="data_splitting",
+                    error_type="distribution_drift",
+                    root_cause=f"{len(drifted)} feature(s) drift between train and test "
+                               f"(PSI≥0.25): {top}",
+                    recommended_fix="If the split is time-based, the test score reflects future "
+                                    "data (good); if random, large PSI may indicate instability.",
+                    retryable=False,
+                ))
+                state.data_quality_flags["drift_psi"] = {c: round(p, 3) for c, p in drifted[:10]}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Drift check skipped: {e}")
+        return errors
+
     @log_stage_timing("error_detection")
     def run(self, state: PipelineState) -> PipelineState:
         all_errors: list[ErrorReport] = []
@@ -133,6 +199,7 @@ class ErrorDetectionService:
         all_errors.extend(self._check_class_imbalance(state))
         all_errors.extend(self._check_all_models_failed(state))
         all_errors.extend(self._check_preprocessing_quality(state))
+        all_errors.extend(self._check_drift(state))
 
         for err in all_errors:
             state.add_error(err)

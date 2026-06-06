@@ -92,17 +92,47 @@ class FeatureEngineeringService:
         return df
 
     def extract_datetime_features(self, df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-        """Extract useful features from datetime columns."""
+        """Extract useful features from datetime columns.
+
+        Beyond the raw parts (year/month/dow/hour), add:
+        * **cyclical** sin/cos for month, day-of-week and hour, so models (esp.
+          linear ones) see that December is adjacent to January and 23:00 to 00:00
+          rather than maximally far apart;
+        * **is_weekend** (a common, strong signal);
+        * **recency_days** — days before the most recent timestamp in the column
+          (captures "how old / how recent", e.g. freshly-created scam postings).
+
+        Downstream feature selection prunes any of these that aren't informative.
+        """
         created: list[str] = []
         dt_cols = df.select_dtypes(include=["datetime64"]).columns.tolist()
         for col in dt_cols:
+            s = df[col]
             for attr, suffix in [("year", "_year"), ("month", "_month"), ("dayofweek", "_dow"), ("hour", "_hour")]:
-                new_col = col + suffix
                 try:
-                    df[new_col] = getattr(df[col].dt, attr)
-                    created.append(new_col)
+                    df[col + suffix] = getattr(s.dt, attr)
+                    created.append(col + suffix)
                 except Exception:
                     pass
+            # Cyclical encodings (period-aware): sin/cos so the wrap-around is smooth.
+            for attr, period, suffix in [("month", 12, "_month"), ("dayofweek", 7, "_dow"), ("hour", 24, "_hour")]:
+                try:
+                    vals = getattr(s.dt, attr).astype(float)
+                    df[col + suffix + "_sin"] = np.sin(2 * np.pi * vals / period)
+                    df[col + suffix + "_cos"] = np.cos(2 * np.pi * vals / period)
+                    created += [col + suffix + "_sin", col + suffix + "_cos"]
+                except Exception:
+                    pass
+            try:
+                df[col + "_is_weekend"] = (s.dt.dayofweek >= 5).astype(int)
+                created.append(col + "_is_weekend")
+            except Exception:
+                pass
+            try:
+                df[col + "_recency_days"] = (s.max() - s).dt.days
+                created.append(col + "_recency_days")
+            except Exception:
+                pass
             df = df.drop(columns=[col])
         return df, created
 

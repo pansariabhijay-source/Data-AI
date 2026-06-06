@@ -136,6 +136,18 @@ notebook · `65bce31` reports-page clarity · `739778d` gitignore reports-route 
   `nbformat.validate`. Verified live: 200, valid .ipynb, correct content-type.
 
 ### Pipeline / ML
+- **Richer datetime decomposition** (`agents/feature_engineering/tools.py`,
+  `extract_datetime_features`). Beyond raw year/month/dow/hour, now adds
+  **cyclical** sin/cos for month/dow/hour (so Dec≈Jan, 23h≈0h — matters for
+  linear models), **is_weekend**, and **recency_days** (days before the latest
+  timestamp). Verified one datetime column expands to 12 features; selection
+  prunes the rest.
+- **Train→test drift detection (PSI)** (`agents/error_detection/tools.py`,
+  `_check_drift`). Computes Population Stability Index per numeric feature
+  between the train and test splits (row-capped sample); flags features with
+  PSI≥0.25 as a LOW finding + records `data_quality_flags["drift_psi"]`.
+  Diagnostic only. Verified: catches a shifted feature (PSI=5.7), ignores a
+  stable one.
 - **Prominent leakage-removal callout in the report**
   (`agents/finalization/tools.py`). When columns that almost perfectly predict
   the target are detected and dropped, the Executive Summary now explains the
@@ -274,8 +286,8 @@ notebook · `65bce31` reports-page clarity · `739778d` gitignore reports-route 
 ### Tier 3 — feature & data quality
 6. **Frequency encoding** for high-cardinality categoricals — DONE (see Done).
 7. **Missing-indicator features** before imputation — DONE (see Done).
-8. **Richer datetime decomposition** (cyclical hour/day, is_weekend, recency).
-9. **Train/test drift checks** (PSI) in `error_detection`.
+8. **Richer datetime decomposition** — DONE (see Done).
+9. **Train/test drift checks** (PSI) — DONE (see Done).
 10. **Persist preprocessing + FE as one `sklearn.Pipeline`** for reproducible
     inference / no train-serve skew.
 
