@@ -1057,6 +1057,8 @@ async def list_runs(user: User = Depends(get_current_user), db=Depends(get_db)):
             "duration_seconds": None,
             "current_stage": None,
             "mode": h.mode or "free",
+            "dataset": Path(h.data_path).name if h.data_path else None,
+            "target": h.target_column,
             "best_model": best_model,
             "best_metric_value": best_metric_value,
             "completed_stages": [],
@@ -1076,6 +1078,9 @@ async def list_runs(user: User = Depends(get_current_user), db=Depends(get_db)):
             "duration_seconds": _duration_seconds(info.get("started_at"), info.get("completed_at")),
             "current_stage": info.get("current_stage"),
             "mode": info.get("mode", "free"),
+            "dataset": (Path(info["data_path"]).name if info.get("data_path")
+                        else runs.get(rid, {}).get("dataset")),
+            "target": info.get("target_column") or runs.get(rid, {}).get("target"),
             "best_model": (result or {}).get("best_model") or runs.get(rid, {}).get("best_model"),
             "best_metric_value": (result or {}).get("best_metric_value") or runs.get(rid, {}).get("best_metric_value"),
             "completed_stages": info.get("completed_stages", []),

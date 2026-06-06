@@ -388,6 +388,8 @@ export async function listExperiments(): Promise<{
     duration_seconds: number | null;
     current_stage: string | null;
     mode?: string;
+    dataset?: string | null;
+    target?: string | null;
     best_model?: string;
     best_metric_value?: number;
     completed_stages: string[];

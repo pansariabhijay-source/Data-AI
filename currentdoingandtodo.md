@@ -18,6 +18,13 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Reports / Export
+- **Reports page now identifies each run clearly** (`/api/runs` +
+  `app/enterprise/reports/page.tsx`). The list was showing only a cryptic
+  `run_id`. `/api/runs` now also returns the **dataset filename**, **target**,
+  and **completed timestamp**; the cards were redesigned to headline the dataset
+  name, with date · time, a Free/Pro badge, target, champion + metric, and the
+  run_id demoted to a small reference line. Users can now tell at a glance which
+  report is for which dataset and when.
 - **True reproduction notebook** (`build_reproduction_notebook`,
   `GET /api/report/{run_id}/notebook?kind=reproduce`, "Reproduce" button). A
   standalone notebook that **re-runs Axiom's actual pipeline agent-by-agent**
