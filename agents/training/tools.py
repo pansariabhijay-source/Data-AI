@@ -45,6 +45,59 @@ from core.utils import ensure_directory, get_timestamp
 
 logger = get_logger("training")
 
+# Cap on rows used to FIT candidate models. For tabular data a stratified sample
+# trains near-identical models in a fraction of the time (model_training was the
+# pipeline's dominant cost on large data). The champion is still scored on the
+# full validation split and tested on the full untouched test set, so this only
+# trades a touch of fitting data for a large speed-up. Override via
+# TRAIN_SAMPLE_ROWS (0 disables subsampling entirely).
+try:
+    _TRAIN_SAMPLE_ROWS = int(os.environ.get("TRAIN_SAMPLE_ROWS", "100000"))
+except ValueError:
+    _TRAIN_SAMPLE_ROWS = 100000
+
+# Keep at least this many rows of every class when subsampling, so rare classes
+# (e.g. fraud positives) never get sampled away.
+_MIN_ROWS_PER_CLASS = 2000
+
+
+def _subsample_for_training(
+    X: np.ndarray, y: np.ndarray, problem_type: ProblemType, seed: int,
+    cap: Optional[int] = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return a (stratified, for classification) subsample capped at ``cap`` rows.
+
+    Class proportions are preserved, but every class keeps at least
+    ``_MIN_ROWS_PER_CLASS`` rows so minority signal survives. No-op when the data
+    is already within the cap or subsampling is disabled.
+    """
+    cap = _TRAIN_SAMPLE_ROWS if cap is None else cap
+    n = len(X)
+    if cap <= 0 or n <= cap:
+        return X, y
+
+    rng = np.random.default_rng(seed)
+    if problem_type == ProblemType.CLASSIFICATION:
+        classes, counts = np.unique(y, return_counts=True)
+        keep: list[np.ndarray] = []
+        for cls, cnt in zip(classes, counts):
+            cls_idx = np.where(y == cls)[0]
+            alloc = int(round(cap * cnt / n))
+            alloc = max(alloc, min(int(cnt), _MIN_ROWS_PER_CLASS))
+            alloc = min(alloc, int(cnt))
+            sel = cls_idx if alloc >= cnt else rng.choice(cls_idx, size=alloc, replace=False)
+            keep.append(sel)
+        idx = np.concatenate(keep)
+    else:
+        idx = rng.choice(n, size=cap, replace=False)
+
+    rng.shuffle(idx)
+    logger.info(
+        f"Subsampling training data {n} -> {len(idx)} rows for candidate fitting "
+        f"(cap={cap}); champion is still scored on the full val/test splits."
+    )
+    return X[idx], y[idx]
+
 
 class ModelTrainingService:
     def __init__(self, config: TrainingConfig, registry: ModelRegistry, seed: int = 42) -> None:
@@ -324,6 +377,13 @@ class ModelTrainingService:
                     "minority_after": rr.minority_after,
                     "target_ratio": tcfg.smote_sampling_strategy,
                 }
+
+        # Cap rows used to fit candidate models (stratified). The dominant cost on
+        # large data; champion is still scored on the full val/test splits.
+        if problem_type != ProblemType.CLUSTERING:
+            X_train, y_train = _subsample_for_training(
+                X_train, y_train, problem_type, settings.pipeline.random_seed,
+            )
 
         # Drop models that don't scale to this many rows (e.g. kernel SVC is
         # O(n^2)+ and would hang on large data) rather than letting them stall the run.
