@@ -18,6 +18,19 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Pipeline / ML
+- **Probability calibration of the champion** (`agents/training/tools.py`,
+  `_maybe_calibrate_champion`, `CALIBRATE_CHAMPION`, default ON). Tree ensembles
+  /boosters produce miscalibrated probabilities, yet the F1-optimal threshold and
+  any risk scores sit on top of them. After selection, the champion is calibrated
+  on the val split via `CalibratedClassifierCV(FrozenEstimator(model))` (isotonic
+  ≥1k rows else sigmoid — no base refit), the threshold is re-derived on
+  calibrated probs, and it's **adopted only if the Brier score improves**.
+  Calibration is monotonic so AUC/selection is never affected (verified).
+  `scripts/calibration_experiment.py`: test Brier improved on 7/9 model-datasets,
+  AUC preserved on all. Made `core/ensemble.ProbabilityAveragingEnsemble` a
+  first-class sklearn classifier (BaseEstimator/ClassifierMixin + `fit`) so the
+  frequent ensemble champion is calibratable too; finalization unwraps the
+  calibrated wrapper so SHAP keeps using the fast explainer.
 - **Bounded SHAP KernelExplainer cost** (`agents/finalization/tools.py`,
   `SHAP_KERNEL_NSAMPLES`, default 100). Tree/linear champions use the fast exact
   explainers, but ensembles/SVC fall to the model-agnostic KernelExplainer,
@@ -95,11 +108,7 @@ Newest changes at the top of each section.
 2. **CV-based champion selection** — DONE as an opt-in (see Done section). If a
    future fairer test on boosting-clustered datasets shows broad benefit,
    reconsider flipping `CV_SELECTION_FOLDS` on by default.
-3. **Probability calibration of the champion.** The F1-optimal threshold and any
-   probability outputs sit on *uncalibrated* scores. Wrap the champion in
-   `CalibratedClassifierCV` (binary classification), re-derive the threshold on
-   calibrated probs, adopt only if it doesn't hurt val score. Real PR-AUC gains
-   for imbalanced/fraud; keep it gated and fast.
+3. **Probability calibration of the champion** — DONE (see Done section).
 
 ### Tier 2 — scalability & smarter tuning
 4. **Gate / cheapen tuning.** Only tune when CV std is high or the top-2 models
@@ -136,6 +145,7 @@ Newest changes at the top of each section.
 | `VIZ_SAMPLE_ROWS` | 50000 | Rows used to render charts (upload + per-agent) |
 | `MI_SAMPLE_ROWS` | 50000 | Rows used for mutual-info feature ranking (0 = off) |
 | `SHAP_KERNEL_NSAMPLES` | 100 | Coalition budget for SHAP KernelExplainer (ensembles/SVC) |
+| `CALIBRATE_CHAMPION` | 1 | Calibrate champion probabilities (0 = off) |
 | `ARTIFACT_MAX_RUNS` | 25 | Max run dirs kept |
 | `ARTIFACT_MIN_KEEP` | 5 | Always-kept newest runs |
 | `ARTIFACT_RETENTION_DAYS` | 30 | Age cap for runs/uploads |

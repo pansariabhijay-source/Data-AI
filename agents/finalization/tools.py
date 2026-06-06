@@ -161,6 +161,18 @@ class FinalizationService:
         try:
             import shap
             model = joblib.load(state.best_model_path)
+            # A calibrated champion is a CalibratedClassifierCV wrapper — explain
+            # its underlying estimator so the fast TreeExplainer/LinearExplainer
+            # still applies (the calibrator is monotonic and doesn't change which
+            # features matter).
+            try:
+                from sklearn.calibration import CalibratedClassifierCV
+                if isinstance(model, CalibratedClassifierCV):
+                    inner = getattr(model, "estimator", model)
+                    # Unwrap FrozenEstimator -> the real base; else use inner.
+                    model = getattr(inner, "estimator", inner)
+            except Exception:
+                pass
             train_df = pd.read_csv(state.train_path, low_memory=False)
             target = state.target_column
 

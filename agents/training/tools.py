@@ -83,6 +83,16 @@ except ValueError:
 # Prefer models with a higher mean but also lower fold-to-fold variance.
 _CV_STD_PENALTY = 0.25
 
+# Calibrate the champion's probabilities (isotonic/sigmoid) so the F1-optimal
+# threshold and any probability outputs are trustworthy — tree ensembles in
+# particular are badly miscalibrated. Calibration is monotonic, so it never
+# changes the AUC-based champion selection; we adopt it only if it improves the
+# Brier score. Set CALIBRATE_CHAMPION=0 to disable.
+try:
+    _CALIBRATE_CHAMPION = int(os.environ.get("CALIBRATE_CHAMPION", "1"))
+except (TypeError, ValueError):
+    _CALIBRATE_CHAMPION = 1
+
 
 def _subsample_for_training(
     X: np.ndarray, y: np.ndarray, problem_type: ProblemType, seed: int,
@@ -361,6 +371,76 @@ class ModelTrainingService:
             logger.warning(f"Ensemble construction failed: {e}")
             return None
 
+    def _maybe_calibrate_champion(
+        self, state: PipelineState, best: ModelResult,
+        X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
+        artifact_dir: Path,
+    ) -> None:
+        """Calibrate the binary champion's probabilities on the val split.
+
+        Uses CalibratedClassifierCV(cv="prefit") so the base model is not refit
+        (cheap). Calibration is monotonic, so AUC/selection is unchanged; we adopt
+        it only if it improves the Brier score, then re-derive the F1-optimal
+        threshold on the calibrated probabilities. The honest test evaluation that
+        follows then reflects the calibrated model.
+        """
+        if not _CALIBRATE_CHAMPION or problem_type != ProblemType.CLASSIFICATION:
+            return
+        if X_val is None or len(X_val) < 50 or len(np.unique(y_val)) != 2:
+            return
+        try:
+            from sklearn.calibration import CalibratedClassifierCV
+            from sklearn.frozen import FrozenEstimator
+            from sklearn.metrics import brier_score_loss
+
+            model = joblib.load(best.model_path)
+            if not hasattr(model, "predict_proba"):
+                return
+            classes = np.asarray(getattr(model, "classes_", [0, 1]))
+            pos = classes[-1]
+            y_bin = (np.asarray(y_val) == pos).astype(int)
+
+            brier_before = brier_score_loss(y_bin, positive_class_proba(model.predict_proba(X_val)))
+            method = "isotonic" if len(X_val) >= 1000 else "sigmoid"
+            # FrozenEstimator keeps the champion (trained on the full train split)
+            # fixed and fits only the calibrator on val — the modern replacement
+            # for the removed cv="prefit".
+            calib = CalibratedClassifierCV(FrozenEstimator(model), method=method)
+            calib.fit(X_val, y_val)
+            brier_after = brier_score_loss(y_bin, positive_class_proba(calib.predict_proba(X_val)))
+
+            if brier_after >= brier_before:
+                logger.info(
+                    f"Calibration ({method}) did not improve Brier "
+                    f"({brier_before:.4f}->{brier_after:.4f}); keeping uncalibrated."
+                )
+                return
+
+            cal_proba = calib.predict_proba(X_val)
+            preds, threshold = predict_with_optimal_threshold(y_val, cal_proba, calib.classes_)
+            metrics = compute_metrics(y_val, preds, problem_type, cal_proba)
+
+            path = artifact_dir / f"{best.model_name}_calibrated.joblib"
+            joblib.dump(calib, path)
+            best.model_path = str(path)
+            best.decision_threshold = threshold
+            best.metrics = metrics
+            state.best_model_path = str(path)
+            state.best_threshold = threshold
+            if state.best_metric_name in metrics:
+                state.best_metric_value = metrics[state.best_metric_name]
+            state.data_quality_flags["calibration"] = {
+                "method": method,
+                "brier_before": round(float(brier_before), 4),
+                "brier_after": round(float(brier_after), 4),
+            }
+            logger.info(
+                f"Calibrated champion ({method}): Brier {brier_before:.4f}->{brier_after:.4f}, "
+                f"threshold->{threshold:.4f}"
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Champion calibration skipped (non-critical): {e}")
+
     def _evaluate_on_test(
         self, state: PipelineState, settings: Settings,
         problem_type: ProblemType, target: Optional[str],
@@ -546,6 +626,10 @@ class ModelTrainingService:
             state.best_threshold = best.decision_threshold
             thr_note = f", threshold={best.decision_threshold:.4f}" if best.decision_threshold is not None else ""
             logger.info(f"Best model: {best.model_name} ({primary_metric}={best.metrics[primary_metric]:.4f}{thr_note}, sel_score={score_of(best):.4f})")
+
+            # Calibrate the champion's probabilities (monotonic — selection above
+            # is unchanged) so its threshold and probability outputs are trustworthy.
+            self._maybe_calibrate_champion(state, best, X_val, y_val, problem_type, artifact_dir)
 
             # Honest held-out evaluation of the champion on the untouched test set.
             self._evaluate_on_test(state, settings, problem_type, target)

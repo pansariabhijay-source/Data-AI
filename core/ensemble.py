@@ -13,14 +13,20 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin
 
 
-class ProbabilityAveragingEnsemble:
+class ProbabilityAveragingEnsemble(ClassifierMixin, BaseEstimator):
     """Soft-voting ensemble that averages the ``predict_proba`` of fitted models.
 
     All members must share the same ``classes_`` ordering (guaranteed when they
     were trained on the same target). ``weights`` lets stronger members count for
     more; defaults to equal weighting.
+
+    Inherits ``BaseEstimator``/``ClassifierMixin`` (Mixin on the left, per
+    sklearn's MRO rule) so it's a first-class sklearn classifier — required to
+    wrap it in ``FrozenEstimator`` + ``CalibratedClassifierCV`` for probability
+    calibration.
     """
 
     def __init__(
@@ -33,11 +39,19 @@ class ProbabilityAveragingEnsemble:
         if not estimators:
             raise ValueError("ProbabilityAveragingEnsemble requires >= 1 estimator")
         self.estimators = estimators
+        # Keep the constructor-named `classes` so BaseEstimator param introspection
+        # works, alongside the fitted-convention `classes_`.
+        self.classes = classes
         self.classes_ = np.asarray(classes)
         self.member_names = member_names or [type(e).__name__ for e in estimators]
         if weights is not None and len(weights) != len(estimators):
             raise ValueError("weights length must match estimators length")
         self.weights = np.asarray(weights, dtype=float) if weights is not None else None
+
+    def fit(self, X: Any = None, y: Any = None) -> "ProbabilityAveragingEnsemble":
+        """No-op: members are already fitted. Present so sklearn treats this as a
+        fitted estimator (e.g. when wrapped in FrozenEstimator for calibration)."""
+        return self
 
     def predict_proba(self, X: Any) -> np.ndarray:
         probs = np.array([est.predict_proba(X) for est in self.estimators])
