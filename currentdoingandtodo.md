@@ -5,6 +5,99 @@ Newest changes at the top of each section.
 
 ---
 
+## 📖 Session context / handoff (read this first)
+
+This is the full story of the work session, so anyone (or a fresh chat) can pick
+up with complete context. Everything below is **committed and pushed to GitHub
+`main`** (latest commit `739778d`).
+
+### How it started — the reported bug
+The user reported: *"whenever I upload a dataset it takes ages and then fails to
+connect to the backend"* and suspected an auth problem. **It was not auth.**
+
+**Root cause #1 (event-loop block):** `/api/upload` rendered 5 matplotlib charts
+on the **full** dataset *synchronously on the asyncio event loop*, freezing the
+whole server during every upload. Proven: a concurrent request was blocked
+**6.6 s** before the fix → **73 ms** after. Fix: moved all heavy work to a
+threadpool, stream the upload to disk in chunks, render charts on a 50k sample,
+warm up matplotlib at startup, return 4xx (not 500) for bad files, namespace
+uploads per-user, and `generate_run_id()` now has a random suffix (it was
+colliding under concurrency). Added `GET /api/health`. Built a full test harness
+(`scripts/e2e_test.py` + `scripts/synth_datasets.py`, 22 datasets) → **153/153
+green**.
+
+**Root cause #2 (surfaced when user retested):** uploading a **>300 MB** file —
+the Next.js dev proxy buffers the body and resets the connection past its cap
+(`ECONNRESET`), which the UI mislabeled "backend not connected." Fix: uploads now
+go **directly to the backend** (bypass the proxy), cap raised to 1 GB, graceful
+**507** on disk-full. Also discovered the machine's **C: drive was full** — a
+recurring source of fake "failures" (ENOSPC); led to the artifact-retention
+policy below.
+
+### The big themes we worked through (in order)
+1. **Upload reliability** (above) + report rendering made premium (react-markdown
+   in-app; PDF tables fixed).
+2. **"The agents do nothing / pipeline runs in 5s"** — *disproven.* A diagnostic
+   (`scripts/diagnose_pipeline.py`) showed every agent does real work
+   (preprocessing removed 20k dup rows, FE encoded + dropped a constant col,
+   training fit 7 models, etc.). Found + fixed a real bug: the **improvement
+   agent crashed** when the champion was an ensemble ("VotingEnsemble not
+   registered"). Cut the fruitless tuning budget.
+3. **Artifact-retention policy** so runs don't fill the disk.
+4. **Performance arc (≈2× faster pipeline)** — profile → prove quality-neutral →
+   commit, each step: train on a 100k stratified subsample, forest trees 300→150,
+   mutual-info on a 50k sample, SHAP KernelExplainer bounded, viz `.iloc` bug fix.
+5. **Quality features** — probability calibration (default on, proven), CV-based
+   champion selection (proven *not* worth defaulting on → opt-in), frequency
+   encoding for high-cardinality cats, missing-value indicators.
+6. **Reliability** — process isolation (pipeline runs in a child process).
+7. **The leakage investigation** (see below) — the headline ML finding.
+8. **Notebook exports** — a report `.ipynb` and a *true reproduction* `.ipynb`.
+9. **Reports page** redesigned to show dataset + date/time (+ fixed a gitignore
+   bug that had stopped the whole reports route from being tracked).
+10. **Cleanup** — deleted build caches/logs/debris and the 651 MB `.next` cache.
+
+### KEY ML FINDING — the fake-internship "accuracy gap" was data leakage
+The user compared our report (champion `LogisticRegression_tuned`, **F1 ≈ 0.81 /
+acc 0.91**) to a Kaggle notebook claiming **99.9% accuracy** and asked why we
+didn't match. **Answer: the notebook leaks.** The dataset ships a `fraud_score`
+column with **ROC-AUC = 1.0** to the label (the label is ~`fraud_score > 50`) —
+it *is* the answer. The notebook did `X = df.drop("is_fake_posting")`, keeping
+`fraud_score`, so XGBoost trivially hit 99.9%. Reproduced exactly: XGB **with**
+the leak = 0.9994; XGB **without** = 0.916/0.801 — matching our champion. Our
+pipeline's AUC-based leakage detector (`core/validation.detect_target_leakage`,
+threshold 0.999) correctly drops it and reports the honest ~0.91. **Our pipeline
+is correct; the notebook is wrong.** We did NOT weaken detection to "match" —
+instead added a prominent leakage callout to the report. (Memory: `fake_internship_leakage`.)
+
+### `fraud.csv` poor F1 — also not a bug
+`fraud.csv` is essentially **noise** (AUC ≈ 0.52 ≈ random). No model can predict
+it; a poor F1 is the honest, correct outcome. The real Kaggle credit-card data
+(`creditcard.csv`) gets F1 ≈ 0.85. `fraud.csv` isn't in the repo anymore.
+
+### Commits this session (all on `main`)
+`497dd4d` upload event-loop fix + e2e harness · `4768578` direct large uploads +
+premium reports + agent fixes · `37a3048` artifact retention · `ef696c2` train
+subsample · `ef2053e` CV-selection opt-in · `fea112a` SHAP bound · `a53aec7` MI
+sample · `6d593ad` forest trees 300→150 · `da2395c` probability calibration ·
+`24dfbd8` process isolation · `0eed10d` frequency encoding + missing indicators ·
+`f034960` leakage callout · `b080e7b` .ipynb export · `ba39e4c` reproduction
+notebook · `65bce31` reports-page clarity · `739778d` gitignore reports-route fix.
+
+### Current state
+- Both servers run via `npm run dev` **from the `frontend/` dir** (launches
+  FastAPI backend on :8000 + Next.js on :3000). NOTE: `npm run dev` must be run
+  from `frontend/`, not the repo root.
+- App: http://localhost:3000 · API health: http://127.0.0.1:8000/api/health
+- Disk was a recurring problem on this machine — kept it clean; deleted `.next`
+  (regenerates), logs, caches, old benchmark JSONs. Kept the 170 MB dataset CSV
+  per the user. The real space hogs are `venv` (~1.4 GB) and
+  `frontend/node_modules` (~0.5 GB), both required to run.
+- Uncommitted-by-design: `.env`/`.claude` local state, the user's dataset CSV,
+  `frontend/dev-all.mjs` + `PROJECT_*.md` deletions (were dirty pre-session).
+
+---
+
 ## ✅ Done (recent)
 
 ### Visualizations
