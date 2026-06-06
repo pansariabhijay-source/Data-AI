@@ -18,6 +18,16 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Pipeline / ML
+- **Prominent leakage-removal callout in the report**
+  (`agents/finalization/tools.py`). When columns that almost perfectly predict
+  the target are detected and dropped, the Executive Summary now explains the
+  honest-vs-leaked framing up front. Motivated by the fake-internship dataset:
+  it ships a `fraud_score` column with **AUC = 1.0** to the label (the label is
+  ~`fraud_score > 50`). A Kaggle notebook kept it and reported 99.9% accuracy —
+  pure leakage. Our pipeline correctly drops it (AUC-based detector,
+  `core/validation.detect_target_leakage`) and reports the honest ~0.91; verified
+  XGBoost-without-`fraud_score` = 0.916 acc / 0.801 f1, matching our champion.
+  The callout makes clear the lower score is the *real* one, not a regression.
 - **Frequency encoding for high-cardinality categoricals**
   (`agents/feature_engineering/tools.py`). High-card columns were *label-encoded*
   (an arbitrary ordinal models misread as magnitude); now each category maps to

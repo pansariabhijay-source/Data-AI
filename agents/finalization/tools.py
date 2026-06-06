@@ -278,6 +278,24 @@ class FinalizationService:
                     f"(not the default 0.5), tuned for the class imbalance in the target.",
                     "",
                 ]
+            # Make the honest-vs-leaked framing unmissable: if columns that almost
+            # perfectly predict the target were removed, the headline score is much
+            # lower than a naive model that keeps them — but it's the real one.
+            leaked = state.data_quality_flags.get("potential_leakage") or []
+            if leaked:
+                cols = ", ".join(f"`{c}`" for c in leaked[:8])
+                more = f" (+{len(leaked) - 8} more)" if len(leaked) > 8 else ""
+                lines += [
+                    f"**Leakage-free score.** {len(leaked)} feature(s) that almost perfectly "
+                    f"predict the target — {cols}{more} — were detected and **removed before "
+                    f"training**, because they would not be known at prediction time in the real "
+                    f"world (they effectively encode the answer). The scores in this report are "
+                    f"therefore an honest estimate of real-world performance. A model trained "
+                    f"*with* those columns can report near-perfect accuracy (~99%) but is useless "
+                    f"in production — it is simply reading the label back. Removing leakage is why "
+                    f"this honest score is lower than a naive baseline that keeps every column.",
+                    "",
+                ]
             lines += ["---", ""]
 
         # ── Held-Out Test Performance ─────────────────────────────────────────
