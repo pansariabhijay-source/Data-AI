@@ -97,6 +97,17 @@ export default function FreeModePage() {
   const currentStep = !uploadData ? 1 : 2;
 
   const handleFile = useCallback(async (file: File) => {
+    // Fail fast with a friendly message instead of streaming a huge file only
+    // for the backend to reject it. Mirror the backend MAX_UPLOAD_MB (300).
+    const MAX_MB = 300;
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setError(`File is ${(file.size / 1024 / 1024).toFixed(0)} MB — the limit is ${MAX_MB} MB.`);
+      return;
+    }
+    if (file.size === 0) {
+      setError("That file is empty.");
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -316,7 +327,7 @@ export default function FreeModePage() {
                       </span>
                     </p>
                     <p className="text-[12px] text-text-ghost mt-2">
-                      CSV · TSV · any tabular format · up to 100 MB
+                      CSV · TSV · any tabular format · up to 300 MB
                     </p>
                   </div>
                 </div>

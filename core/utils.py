@@ -43,8 +43,16 @@ def ensure_directory(path: str | Path) -> Path:
 
 
 def generate_run_id() -> str:
-    """Generate a unique run ID based on timestamp."""
-    return datetime.now(timezone.utc).strftime("run_%Y%m%d_%H%M%S")
+    """Generate a unique run ID.
+
+    A timestamp prefix keeps IDs human-sortable, but second precision alone
+    collides when two runs start in the same second (concurrent pipelines, fast
+    clicks). A short random suffix guarantees uniqueness so runs never share an
+    ID — which would otherwise mix up their state, history, and artifacts.
+    """
+    import secrets
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"run_{ts}_{secrets.token_hex(3)}"
 
 
 def get_timestamp() -> str:

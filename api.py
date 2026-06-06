@@ -33,6 +33,7 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query, Depends
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,7 +46,39 @@ from core.state import PipelineState
 from core.utils import generate_run_id, get_timestamp, ensure_directory
 from database import get_db, User, UserSession, PromptHistory, UserPreference, SessionLocal
 
-app = FastAPI(title="Axiom — Autonomous AI Platform", version="2.0.0")
+logger = get_logger("api")
+
+
+def _warm_up_viz() -> None:
+    """Prime heavy imports (matplotlib/seaborn + font cache) in a daemon thread.
+
+    The first dataset upload renders charts; without warming, that very first
+    request eats a ~5s one-time import/font-cache cost and *feels* like a hang.
+    """
+    def _prime() -> None:
+        try:
+            import pandas as pd
+            from visualization.engine import generate_free_mode_viz
+            generate_free_mode_viz(pd.DataFrame({"a": [1, 2, 3], "b": [3, 2, 1]}))
+            logger.info("Visualization engine warmed up")
+        except Exception:
+            logger.warning("Viz warm-up failed (non-fatal)", exc_info=True)
+
+    threading.Thread(target=_prime, daemon=True).start()
+
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Startup
+    _warm_up_viz()
+    yield
+    # Shutdown (nothing to clean up — background runs are daemon threads)
+
+
+app = FastAPI(title="Axiom — Autonomous AI Platform", version="2.0.0", lifespan=_lifespan)
 
 # Lock CORS to explicitly allowed origins. Defaults to the local Next.js dev
 # server; override via the ALLOWED_ORIGINS env var (comma-separated) in prod.
@@ -66,8 +99,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-logger = get_logger("api")
 
 # ── Auth Config ─────────────────────────────────────────────────────────────
 
@@ -104,6 +135,25 @@ _persist_lock = threading.Lock()
 _ARTIFACT_ROOT = Path(os.environ.get("ARTIFACT_DIR", "artifacts"))
 _UPLOADS_ROOT = Path("data") / "uploads"
 _NON_PERSISTED_KEYS = {"pipeline_state"}
+
+# ── Upload limits / tuning ──────────────────────────────────────────────────
+# Hard cap on uploaded dataset size. Defaults to 300 MB to match the Next.js dev
+# proxy body limit (frontend/next.config.ts). Override via MAX_UPLOAD_MB.
+try:
+    _MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "300"))
+except ValueError:
+    _MAX_UPLOAD_MB = 300
+_MAX_UPLOAD_BYTES = _MAX_UPLOAD_MB * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MB streaming chunks
+
+# Visualizations are rendered on at most this many rows. Charts are statistical
+# summaries, so a representative sample looks identical to the full set while
+# keeping render time bounded regardless of dataset size. Override via
+# VIZ_SAMPLE_ROWS.
+try:
+    _VIZ_SAMPLE_ROWS = int(os.environ.get("VIZ_SAMPLE_ROWS", "50000"))
+except ValueError:
+    _VIZ_SAMPLE_ROWS = 50000
 
 
 def _run_state_path(run_id: str) -> Path:
@@ -323,6 +373,16 @@ async def set_workspace_mode(
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 
+@app.get("/api/health")
+async def health_check():
+    """Lightweight liveness probe — never touches the DB or disk-heavy paths.
+
+    The frontend can hit this to distinguish 'backend down' from 'request slow',
+    and it doubles as a load-balancer/uptime healthcheck.
+    """
+    return {"status": "ok", "service": "axiom-api", "active_runs": len(_active_runs)}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_dashboard():
     """Serve the main dashboard HTML."""
@@ -370,6 +430,86 @@ def _sanitize_for_json(obj):
     return obj
 
 
+async def _stream_upload_to_disk(file: UploadFile, dest: Path) -> int:
+    """Stream an upload to ``dest`` in chunks, enforcing the size cap.
+
+    Streaming avoids buffering the whole (potentially hundreds-of-MB) file in
+    memory and lets us abort early once the cap is exceeded. Returns the number
+    of bytes written.
+    """
+    size = 0
+    too_big = False
+    with open(dest, "wb") as f:
+        while True:
+            chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > _MAX_UPLOAD_BYTES:
+                too_big = True
+                break
+            f.write(chunk)
+    if too_big:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the {_MAX_UPLOAD_MB} MB upload limit",
+        )
+    if size == 0:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    return size
+
+
+def _profile_dataset(dest: Path) -> dict:
+    """Read, profile, and visualize an uploaded dataset.
+
+    Pure CPU/IO work — must be called via ``run_in_threadpool`` so it never
+    blocks the asyncio event loop (a long render here would otherwise freeze
+    every other request and look like the backend is unreachable).
+    """
+    import pandas as pd
+
+    try:
+        df_full = _detect_and_read_csv(dest)
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="The file is empty or has no parsable columns")
+    except (pd.errors.ParserError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse file as a table: {e}")
+
+    if df_full.shape[1] == 0:
+        raise HTTPException(status_code=400, detail="CSV contains no columns")
+    if len(df_full) == 0:
+        raise HTTPException(status_code=400, detail="CSV contains no data rows")
+
+    columns = list(df_full.columns)
+    dtypes = {col: str(dtype) for col, dtype in df_full.dtypes.items()}
+    n_rows = len(df_full)
+    preview = df_full.head(5).to_dict(orient="records")
+
+    # Render charts on a bounded sample so upload latency stays flat regardless
+    # of dataset size. Statistical charts are visually identical on a sample.
+    if n_rows > _VIZ_SAMPLE_ROWS:
+        df_viz = df_full.sample(n=_VIZ_SAMPLE_ROWS, random_state=0)
+    else:
+        df_viz = df_full
+
+    visualizations: list = []
+    try:
+        from visualization.engine import generate_free_mode_viz
+        visualizations = generate_free_mode_viz(df_viz)
+    except Exception as viz_err:
+        logger.warning(f"Auto-visualization failed: {viz_err}")
+
+    return {
+        "columns": columns,
+        "dtypes": dtypes,
+        "n_rows": n_rows,
+        "preview": preview,
+        "visualizations": visualizations,
+    }
+
+
 @app.post("/api/upload")
 async def upload_dataset(
     file: UploadFile = File(...),
@@ -386,47 +526,32 @@ async def upload_dataset(
 
     # Strip any directory components — never trust a client-supplied filename.
     safe_name = Path(file.filename).name
-    upload_dir = ensure_directory("data/uploads")
+    # Namespace uploads per user so two users uploading "data.csv" never collide
+    # or overwrite each other (a cross-user data leak). _safe_data_path still
+    # confines downstream reads to the uploads root, so the subdir is allowed.
+    upload_dir = ensure_directory(f"data/uploads/{user.id}")
     dest = upload_dir / safe_name
+
+    # 1) Stream to disk (fast, I/O-bound, safe to await on the event loop).
+    size = await _stream_upload_to_disk(file, dest)
+    logger.info(f"File uploaded: {safe_name} ({size} bytes)")
+
+    # 2) Profile + visualize off the event loop so concurrent requests (status
+    #    polls, auth, other uploads) stay responsive during the heavy work.
     try:
-        with open(dest, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        logger.info(f"File uploaded: {file.filename} ({len(content)} bytes)")
-
-        import pandas as pd
-
-        # Read full file first (handles encoding + re-saves as utf-8)
-        df_full = _detect_and_read_csv(dest)
-
-        # Quick preview
-        df = df_full.head(5)
-        columns = list(df_full.columns)
-        dtypes = {col: str(dtype) for col, dtype in df_full.dtypes.items()}
-        n_rows = len(df_full)
-
-        # Auto-generate basic visualizations
-        visualizations = []
-        try:
-            from visualization.engine import generate_free_mode_viz
-            visualizations = generate_free_mode_viz(df_full)
-        except Exception as viz_err:
-            logger.warning(f"Auto-visualization failed: {viz_err}")
-
-        # Ensure all data is JSON-compliant (no NaN/Inf)
-        payload = {
-            "status": "success",
-            "filename": file.filename,
-            "path": str(dest),
-            "columns": columns,
-            "dtypes": dtypes,
-            "n_rows": n_rows,
-            "preview": df.to_dict(orient="records"),
-            "visualizations": visualizations,
-        }
-        return _sanitize_for_json(payload)
+        payload = await run_in_threadpool(_profile_dataset, dest)
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Dataset profiling failed")
+        raise HTTPException(status_code=500, detail=f"Could not parse dataset: {e}")
+
+    payload.update({
+        "status": "success",
+        "filename": safe_name,
+        "path": str(dest),
+    })
+    return _sanitize_for_json(payload)
 
 
 @app.post("/api/init-run")
@@ -695,15 +820,19 @@ async def get_report_pdf(run_id: str, user: User = Depends(get_current_user)):
         "duration_seconds": _duration_seconds(run.get("started_at"), run.get("completed_at")),
     }
 
-    try:
+    def _build() -> bytes:
         from visualization.pdf_report import build_pdf
-        pdf_bytes = build_pdf(
+        return build_pdf(
             run_info=run_info,
             result=result,
             visualizations=visualizations,
             shap_data=shap_data,
             markdown_report=md_report,
         )
+
+    try:
+        # PDF assembly is CPU-heavy — keep it off the event loop.
+        pdf_bytes = await run_in_threadpool(_build)
     except Exception as e:
         logger.exception("PDF generation failed")
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
@@ -851,18 +980,25 @@ async def generate_visualization_endpoint(
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=400, detail="Data file not found")
 
-    try:
+    valid_types = {
+        "pairplot", "pca", "correlation", "missing_values",
+        "distributions", "boxplots", "target_distribution",
+    }
+    if request.type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Unknown viz type: {request.type}")
+
+    target = run.get("target_column")
+
+    def _render() -> Optional[dict]:
         import pandas as pd
         from visualization.engine import (
             generate_pairplot, generate_pca_plot,
-            generate_feature_importance, generate_correlation_heatmap,
-            generate_missing_values_heatmap, generate_distributions,
-            generate_boxplots, generate_target_distribution,
+            generate_correlation_heatmap, generate_missing_values_heatmap,
+            generate_distributions, generate_boxplots, generate_target_distribution,
         )
-
-        df = pd.read_csv(data_path)
-        target = run.get("target_column")
-
+        df = _detect_and_read_csv(Path(data_path))
+        if len(df) > _VIZ_SAMPLE_ROWS:
+            df = df.sample(n=_VIZ_SAMPLE_ROWS, random_state=0)
         viz_map = {
             "pairplot": lambda: generate_pairplot(df, target),
             "pca": lambda: generate_pca_plot(df, target),
@@ -872,24 +1008,22 @@ async def generate_visualization_endpoint(
             "boxplots": lambda: generate_boxplots(df),
             "target_distribution": lambda: generate_target_distribution(df, target) if target else None,
         }
+        return viz_map[request.type]()
 
-        if request.type not in viz_map:
-            raise HTTPException(status_code=400, detail=f"Unknown viz type: {request.type}")
-
-        result = viz_map[request.type]()
-        if result:
-            # Cache the visualization
-            vizs = run.setdefault("visualizations", [])
-            vizs.append(result)
-            _persist_run(run_id)
-            return result
-        else:
-            raise HTTPException(status_code=400, detail="Could not generate visualization")
-
-    except HTTPException:
-        raise
+    try:
+        # Heavy render off the event loop so other requests stay responsive.
+        result = await run_in_threadpool(_render)
     except Exception as e:
+        logger.exception("On-demand visualization failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+    if not result:
+        raise HTTPException(status_code=400, detail="Could not generate visualization")
+
+    # Cache the visualization
+    run.setdefault("visualizations", []).append(result)
+    _persist_run(run_id)
+    return _sanitize_for_json(result)
 
 
 # ── Background pipeline execution ──────────────────────────────────────────
@@ -1238,10 +1372,9 @@ async def export_run_excel(run_id: str, user: User = Depends(get_current_user)):
     if not agent_outputs:
         raise HTTPException(status_code=400, detail="No agent outputs available to export yet")
 
-    try:
+    def _build_excel() -> bytes:
         import io
         import pandas as pd
-        from fastapi.responses import StreamingResponse
 
         buf = io.BytesIO()
 
@@ -1307,13 +1440,12 @@ async def export_run_excel(run_id: str, user: User = Depends(get_current_user)):
                 pd.DataFrame(logs).to_excel(writer, sheet_name="Logs", index=False)
 
         buf.seek(0)
-        filename = f"axiom-{run_id[:8]}.xlsx"
-        return StreamingResponse(
-            iter([buf.read()]),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
+        return buf.read()
 
+    try:
+        from fastapi.responses import StreamingResponse
+        # Workbook assembly is CPU-heavy — keep it off the event loop.
+        xlsx_bytes = await run_in_threadpool(_build_excel)
     except ImportError:
         raise HTTPException(
             status_code=500,
@@ -1322,6 +1454,13 @@ async def export_run_excel(run_id: str, user: User = Depends(get_current_user)):
     except Exception as e:
         logger.exception("Excel export failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+    filename = f"axiom-{run_id[:8]}.xlsx"
+    return StreamingResponse(
+        iter([xlsx_bytes]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 if __name__ == "__main__":
