@@ -16,7 +16,7 @@ import {
 import Navbar from "@/components/layout/Navbar";
 import ReportMarkdown from "@/components/ReportMarkdown";
 import {
-  getResults, getReport, getShapData, downloadReportPdf,
+  getResults, getReport, getShapData, downloadReportPdf, downloadReportNotebook,
   ResultsResponse, getVisualizations, generateVisualization, VizResult,
 } from "@/lib/api";
 import { fadeUp, stagger } from "@/lib/animations";
@@ -190,6 +190,15 @@ export default function ReportPage({
     finally { setPdfBusy(false); }
   }, [runId]);
 
+  const [nbBusy, setNbBusy] = useState(false);
+  const handleDownloadNotebook = useCallback(async () => {
+    setNbBusy(true);
+    setPdfError(null);
+    try { await downloadReportNotebook(runId); }
+    catch (e: unknown) { setPdfError(e instanceof Error ? e.message : "Notebook download failed"); }
+    finally { setNbBusy(false); }
+  }, [runId]);
+
   const handleDownloadMd = useCallback(() => {
     if (!report) return;
     const blob = new Blob([report], { type: "text/markdown;charset=utf-8" });
@@ -326,6 +335,18 @@ export default function ReportPage({
                 >
                   <FileText size={13} strokeWidth={2} />
                   Markdown
+                </button>
+                <button
+                  onClick={handleDownloadNotebook}
+                  disabled={nbBusy}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold bg-white/[0.04] border border-glass-border text-text-secondary hover:bg-white/[0.08] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {nbBusy ? (
+                    <div className="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-secondary rounded-full animate-spin" />
+                  ) : (
+                    <FileText size={13} strokeWidth={2} />
+                  )}
+                  {nbBusy ? "Building…" : "Notebook"}
                 </button>
                 <button
                   onClick={handleDownloadPdf}

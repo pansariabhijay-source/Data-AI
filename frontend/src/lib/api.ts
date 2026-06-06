@@ -314,6 +314,24 @@ export async function downloadReportPdf(runId: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+/** Download the run as a Jupyter notebook (.ipynb): report + charts + code. */
+export async function downloadReportNotebook(runId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/report/${runId}/notebook`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail || "Notebook download failed");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `axiom-report-${runId.slice(0, 8)}.ipynb`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function getShapData(runId: string): Promise<Record<string, number>> {
   const res = await authFetch(`${API_BASE}/shap/${runId}`);
   const data = await handleResponse(res, "SHAP data not found");

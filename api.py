@@ -894,6 +894,60 @@ async def get_report_pdf(run_id: str, user: User = Depends(get_current_user)):
     )
 
 
+@app.get("/api/report/{run_id}/notebook")
+async def get_report_notebook(run_id: str, user: User = Depends(get_current_user)):
+    """Export the run as a Jupyter notebook (.ipynb): report narrative + charts +
+    runnable code to load the trained champion and score new data."""
+    run = _require_run(run_id, user)
+    if run["status"] not in ("completed", "failed"):
+        raise HTTPException(status_code=400, detail="Pipeline is still running")
+
+    result = run.get("result") or {}
+    visualizations = run.get("visualizations") or []
+
+    shap_data: Optional[dict] = None
+    shap_path = Path("artifacts") / run_id / "shap_importance.json"
+    if shap_path.exists():
+        try:
+            shap_data = json.loads(shap_path.read_text(encoding="utf-8"))
+        except Exception:
+            shap_data = None
+
+    md_report: Optional[str] = None
+    md_path = Path("reports") / run_id / "pipeline_report.md"
+    if md_path.exists():
+        try:
+            md_report = md_path.read_text(encoding="utf-8")
+        except Exception:
+            md_report = None
+
+    run_info = {"run_id": run_id, "mode": run.get("mode", "free")}
+
+    def _build() -> bytes:
+        from visualization.notebook_report import build_notebook
+        return build_notebook(
+            run_info=run_info,
+            result=result,
+            shap_data=shap_data,
+            markdown_report=md_report,
+            visualizations=visualizations,
+        )
+
+    try:
+        nb_bytes = await run_in_threadpool(_build)
+    except Exception as e:
+        logger.exception("Notebook generation failed")
+        raise HTTPException(status_code=500, detail=f"Notebook generation failed: {e}")
+
+    from fastapi.responses import StreamingResponse
+    filename = f"axiom-report-{run_id[:8]}.ipynb"
+    return StreamingResponse(
+        iter([nb_bytes]),
+        media_type="application/x-ipynb+json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/shap/{run_id}")
 async def get_shap_data(run_id: str, user: User = Depends(get_current_user), db=Depends(get_db)):
     """Get SHAP feature importance data for a completed run."""

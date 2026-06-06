@@ -11,7 +11,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import Navbar from "@/components/layout/Navbar";
 import ReportMarkdown from "@/components/ReportMarkdown";
-import { getResults, getReport, getVisualizations, downloadReportPdf, ResultsResponse, VizResult } from "@/lib/api";
+import { getResults, getReport, getVisualizations, downloadReportPdf, downloadReportNotebook, ResultsResponse, VizResult } from "@/lib/api";
 import { fadeUp, stagger } from "@/lib/animations";
 
 // ── Reusable UI Components ──────────────────────────────────────────────────
@@ -111,6 +111,14 @@ export default function FreeResultsPage({ params }: { params: Promise<{ runId: s
     finally { setPdfBusy(false); }
   }, [runId]);
 
+  const [nbBusy, setNbBusy] = useState(false);
+  const handleDownloadNotebook = useCallback(async () => {
+    setNbBusy(true); setPdfError(null);
+    try { await downloadReportNotebook(runId); }
+    catch (e: unknown) { setPdfError(e instanceof Error ? e.message : "Notebook download failed"); }
+    finally { setNbBusy(false); }
+  }, [runId]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -156,7 +164,11 @@ export default function FreeResultsPage({ params }: { params: Promise<{ runId: s
                 <motion.h1 variants={fadeUp} className="text-3xl md:text-[40px] font-bold tracking-[-0.03em] gradient-text-hero leading-tight">Your AI Results</motion.h1>
                 <motion.p variants={fadeUp} className="text-[14px] text-text-muted mt-2">Your autonomous data scientist finished the job. Here&apos;s everything it found.</motion.p>
               </div>
-              <motion.div variants={fadeUp}>
+              <motion.div variants={fadeUp} className="flex items-center gap-3">
+                <button onClick={handleDownloadNotebook} disabled={nbBusy} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold bg-white/[0.04] border border-glass-border text-text-secondary hover:bg-white/[0.08] transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  {nbBusy ? <div className="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-secondary rounded-full animate-spin" /> : <FileText size={13} strokeWidth={2} />}
+                  {nbBusy ? "Building…" : "Notebook"}
+                </button>
                 <button onClick={handleDownloadPdf} disabled={pdfBusy} className="group flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold bg-accent text-void hover:bg-accent-bright transition-all duration-300 shadow-lg shadow-accent/20 disabled:opacity-50 disabled:cursor-not-allowed">
                   {pdfBusy ? <div className="w-3.5 h-3.5 border-2 border-void/30 border-t-void rounded-full animate-spin" /> : <Download size={14} strokeWidth={2} />}
                   {pdfBusy ? "Generating…" : "Download PDF"}

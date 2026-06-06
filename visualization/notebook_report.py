@@ -1,0 +1,167 @@
+"""
+Axiom — Jupyter Notebook (.ipynb) Report Generator.
+
+Builds a self-contained notebook from a completed run: the report narrative as
+markdown cells, the generated charts embedded as images, the SHAP table, and
+runnable code cells to load the trained champion model and score new data. The
+notebook is plain nbformat-v4 JSON, so this needs no extra dependencies.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Optional
+
+
+def _md(source: str) -> dict:
+    return {"cell_type": "markdown", "metadata": {}, "source": source}
+
+
+def _code(source: str) -> dict:
+    return {"cell_type": "code", "metadata": {}, "execution_count": None,
+            "outputs": [], "source": source}
+
+
+def _split_markdown(md: str) -> list[str]:
+    """Split a markdown report into cells at H2 (``## ``) boundaries."""
+    chunks: list[str] = []
+    cur: list[str] = []
+    for line in md.splitlines():
+        if line.startswith("## ") and cur:
+            chunks.append("\n".join(cur).strip())
+            cur = [line]
+        else:
+            cur.append(line)
+    if cur:
+        chunks.append("\n".join(cur).strip())
+    return [c for c in chunks if c]
+
+
+def _fmt(v: Any) -> str:
+    if isinstance(v, float):
+        return f"{v:.4f}"
+    return "—" if v is None else str(v)
+
+
+def _summary_markdown(result: dict) -> str:
+    """Fallback narrative if no markdown report is available."""
+    ds = result.get("dataset") or {}
+    rows = [
+        f"- **Problem type:** {result.get('problem_type', '—')}",
+        f"- **Target:** `{result.get('target_column', '—')}`",
+        f"- **Champion model:** **{result.get('best_model', '—')}**",
+        f"- **{(result.get('best_metric_name') or 'score').upper()}:** "
+        f"{_fmt(result.get('best_metric_value'))}",
+        f"- **Rows × columns:** {ds.get('rows', '—')} × {ds.get('columns', '—')}",
+    ]
+    return "## Executive Summary\n\n" + "\n".join(rows)
+
+
+def _leaderboard_markdown(result: dict) -> Optional[str]:
+    models = [m for m in (result.get("models") or []) if m.get("status") == "trained"]
+    if not models:
+        return None
+    models.sort(key=lambda m: (list((m.get("metrics") or {}).values())[0] if m.get("metrics") else 0), reverse=True)
+    lines = ["## Model Leaderboard", "", "| Rank | Model | Metrics | Best |", "|---|---|---|---|"]
+    for i, m in enumerate(models, 1):
+        metrics = " · ".join(f"{k}={_fmt(v)}" for k, v in list((m.get("metrics") or {}).items())[:3])
+        lines.append(f"| {i} | {m.get('name')} | {metrics} | {'★' if m.get('is_best') else ''} |")
+    return "\n".join(lines)
+
+
+def _use_model_code(run_id: str, result: dict) -> str:
+    feats = (result.get("features") or {}).get("selected") or []
+    target = result.get("target_column") or "target"
+    feat_repr = "[\n    " + ",\n    ".join(repr(f) for f in feats) + ",\n]" if feats else "[...]"
+    return (
+        "# Load the champion model Axiom trained for this run and score new data.\n"
+        "import glob, joblib, pandas as pd\n\n"
+        f'RUN_ID = "{run_id}"\n'
+        "# Axiom saves every model under the run\'s artifacts dir; the champion is\n"
+        f"# {result.get('best_model', 'the best model')!r}. Pick its .joblib file:\n"
+        'model_files = glob.glob(f"artifacts/{RUN_ID}/models/*.joblib")\n'
+        "print(\"available model files:\", model_files)\n"
+        'model_path = next((p for p in model_files if "_calibrated" in p or "_tuned" in p), model_files[0])\n'
+        "model = joblib.load(model_path)\n\n"
+        "# Features the model expects (after Axiom\'s preprocessing + feature engineering).\n"
+        f"FEATURES = {feat_repr}\n\n"
+        "# Decision threshold: see the F1-optimal threshold in the Executive Summary above\n"
+        "# (Axiom tunes it instead of using the naive 0.5 for imbalanced targets).\n"
+        "THRESHOLD = 0.5  # <-- replace with the threshold from the report\n\n"
+        '# new_data = pd.read_csv("your_new_data.csv")\n'
+        "# proba = model.predict_proba(new_data[FEATURES])[:, 1]\n"
+        "# predictions = (proba >= THRESHOLD).astype(int)\n"
+    )
+
+
+def _eda_code(result: dict) -> str:
+    target = result.get("target_column") or "target"
+    return (
+        "# Load the original dataset to explore it yourself.\n"
+        "import pandas as pd\n\n"
+        'df = pd.read_csv("your_dataset.csv")   # <-- the file you uploaded\n'
+        "print(df.shape)\n"
+        "df.head()\n"
+    )
+
+
+def build_notebook(
+    run_info: dict,
+    result: dict,
+    shap_data: Optional[dict] = None,
+    markdown_report: Optional[str] = None,
+    visualizations: Optional[list[dict]] = None,
+) -> bytes:
+    """Render a completed run as a .ipynb notebook and return its bytes."""
+    run_id = run_info.get("run_id") or result.get("run_id") or "run"
+    cells: list[dict] = []
+
+    cells.append(_md(
+        f"# Axiom Pipeline Report\n\n"
+        f"**Run:** `{run_id}`  \n"
+        f"**Mode:** {run_info.get('mode', 'free')}  \n"
+        f"_Generated by Axiom — Autonomous Data Scientist. This notebook documents the "
+        f"run and lets you load the trained model; the full multi-stage pipeline "
+        f"(leakage detection, calibration, etc.) runs inside Axiom._"
+    ))
+
+    # Narrative: prefer the rich markdown report, split into per-section cells.
+    if markdown_report:
+        for chunk in _split_markdown(markdown_report):
+            cells.append(_md(chunk))
+    else:
+        cells.append(_md(_summary_markdown(result)))
+        lb = _leaderboard_markdown(result)
+        if lb:
+            cells.append(_md(lb))
+
+    # Embed the generated charts as images (Jupyter renders data-URI images).
+    viz = [v for v in (visualizations or []) if v.get("base64_png")]
+    if viz:
+        cells.append(_md("## Visualizations"))
+        for v in viz:
+            cells.append(_md(
+                f"**{v.get('name', 'Chart')}** — {v.get('description', '')}\n\n"
+                f"![{v.get('name', 'chart')}](data:image/png;base64,{v['base64_png']})"
+            ))
+
+    # Runnable code: use the trained model + explore the data.
+    cells.append(_md("## Use the trained model"))
+    cells.append(_code(_use_model_code(run_id, result)))
+    cells.append(_md("## Explore the dataset"))
+    cells.append(_code(_eda_code(result)))
+
+    notebook = {
+        "cells": cells,
+        "metadata": {
+            "kernelspec": {"name": "python3", "display_name": "Python 3"},
+            "language_info": {"name": "python"},
+            "axiom": {"run_id": run_id},
+        },
+        "nbformat": 4,
+        # minor 4 (not 5) so cells don't require an ``id`` field — keeps the
+        # notebook strictly valid without us generating per-cell ids.
+        "nbformat_minor": 4,
+    }
+    return json.dumps(notebook, indent=1).encode("utf-8")

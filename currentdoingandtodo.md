@@ -17,6 +17,15 @@ Newest changes at the top of each section.
   `VIZ_SAMPLE_ROWS`) so data_collection's chart generation stays flat regardless
   of dataset size (was re-rendering the free charts on the full frame).
 
+### Reports / Export
+- **Jupyter notebook (.ipynb) export** (`visualization/notebook_report.py`,
+  `GET /api/report/{run_id}/notebook`, "Notebook" button on the report + free
+  results pages). Exports a run as a self-contained notebook: the report
+  narrative as markdown cells, the generated charts embedded as images, plus
+  runnable code cells to load the trained champion (`joblib`) and score new data.
+  Built as plain nbformat-v4 JSON (no extra runtime dep); validated with
+  `nbformat.validate`. Verified live: 200, valid .ipynb, correct content-type.
+
 ### Pipeline / ML
 - **Prominent leakage-removal callout in the report**
   (`agents/finalization/tools.py`). When columns that almost perfectly predict
