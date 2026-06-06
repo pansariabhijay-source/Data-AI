@@ -137,12 +137,13 @@ _UPLOADS_ROOT = Path("data") / "uploads"
 _NON_PERSISTED_KEYS = {"pipeline_state"}
 
 # ── Upload limits / tuning ──────────────────────────────────────────────────
-# Hard cap on uploaded dataset size. Defaults to 300 MB to match the Next.js dev
-# proxy body limit (frontend/next.config.ts). Override via MAX_UPLOAD_MB.
+# Hard cap on uploaded dataset size. The frontend uploads straight to the
+# backend (bypassing the Next proxy), which streams to disk in chunks, so this
+# can be generous. Override via MAX_UPLOAD_MB.
 try:
-    _MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "300"))
+    _MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "1024"))
 except ValueError:
-    _MAX_UPLOAD_MB = 300
+    _MAX_UPLOAD_MB = 1024
 _MAX_UPLOAD_BYTES = _MAX_UPLOAD_MB * 1024 * 1024
 _UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MB streaming chunks
 
@@ -439,16 +440,29 @@ async def _stream_upload_to_disk(file: UploadFile, dest: Path) -> int:
     """
     size = 0
     too_big = False
-    with open(dest, "wb") as f:
-        while True:
-            chunk = await file.read(_UPLOAD_CHUNK_BYTES)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > _MAX_UPLOAD_BYTES:
-                too_big = True
-                break
-            f.write(chunk)
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > _MAX_UPLOAD_BYTES:
+                    too_big = True
+                    break
+                f.write(chunk)
+    except OSError as e:
+        # Disk full (ENOSPC) or other write failure — clean up the partial file
+        # and return a clear, actionable error instead of a raw 500 traceback.
+        dest.unlink(missing_ok=True)
+        import errno
+        if e.errno == errno.ENOSPC:
+            raise HTTPException(
+                status_code=507,
+                detail="The server ran out of disk space while saving the upload. "
+                       "Free up space and try again.",
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to save upload: {e}")
     if too_big:
         dest.unlink(missing_ok=True)
         raise HTTPException(

@@ -5,11 +5,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Trophy, Layers, Brain, BarChart3, Zap, Clock, AlertTriangle,
   FileText, Sparkles, Download, CheckCircle2, TrendingUp,
-  Database, Eraser, Wrench, ShieldCheck, ArrowRight, ChevronRight,
+  Database, Eraser, Wrench, ShieldCheck, ArrowRight,
   Columns3, Activity, Loader2, X, ZoomIn,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import Navbar from "@/components/layout/Navbar";
+import ReportMarkdown from "@/components/ReportMarkdown";
 import { getResults, getReport, getVisualizations, downloadReportPdf, ResultsResponse, VizResult } from "@/lib/api";
 import { fadeUp, stagger } from "@/lib/animations";
 
@@ -74,98 +75,8 @@ function GlassCard({ children, className = "", hover = true }: { children: React
 
 // ── Markdown Narrative Renderer ──────────────────────────────────────────────
 
-type MdBlock =
-  | { type: "h1" | "h2" | "h3" | "paragraph"; text: string }
-  | { type: "hr" }
-  | { type: "list"; items: string[] }
-  | { type: "table"; headers: string[]; rows: string[][] };
-
-function parseMarkdown(md: string): MdBlock[] {
-  const lines = md.split("\n");
-  const blocks: MdBlock[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const t = lines[i].trim();
-    if (!t) { i++; continue; }
-    const h1 = t.match(/^# (.+)$/); if (h1) { blocks.push({ type: "h1", text: h1[1] }); i++; continue; }
-    const h2 = t.match(/^## (.+)$/); if (h2) { blocks.push({ type: "h2", text: h2[1] }); i++; continue; }
-    const h3 = t.match(/^### (.+)$/); if (h3) { blocks.push({ type: "h3", text: h3[1] }); i++; continue; }
-    if (/^-{3,}$/.test(t)) { blocks.push({ type: "hr" }); i++; continue; }
-    if (t.startsWith("|")) {
-      const tableLines: string[] = [];
-      while (i < lines.length && lines[i].trim().startsWith("|")) { tableLines.push(lines[i]); i++; }
-      const parseRow = (line: string) => line.trim().split("|").slice(1, -1).map((c) => c.trim());
-      const isSep = (row: string[]) => row.every((c) => /^:?-+:?$/.test(c));
-      const allRows = tableLines.map(parseRow);
-      const headers = allRows[0] ?? [];
-      const dataRows = allRows.slice(1).filter((row) => !isSep(row));
-      blocks.push({ type: "table", headers, rows: dataRows });
-      continue;
-    }
-    if (/^[-*] /.test(t)) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*] /.test(lines[i].trim())) { items.push(lines[i].trim().replace(/^[-*] /, "")); i++; }
-      blocks.push({ type: "list", items }); continue;
-    }
-    const paraLines: string[] = [];
-    while (i < lines.length) {
-      const pt = lines[i].trim();
-      if (!pt || /^#{1,6} /.test(pt) || pt.startsWith("|") || /^[-*] /.test(pt) || /^-{3,}$/.test(pt)) break;
-      paraLines.push(pt); i++;
-    }
-    if (paraLines.length > 0) blocks.push({ type: "paragraph", text: paraLines.join(" ") });
-  }
-  return blocks;
-}
-
-function InlineText({ text }: { text: string }) {
-  const tokens = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/);
-  return (<>{tokens.map((tok, i) => {
-    if (tok.startsWith("**") && tok.endsWith("**") && tok.length > 4) return <strong key={i} className="font-semibold text-text-primary">{tok.slice(2, -2)}</strong>;
-    if (tok.startsWith("`") && tok.endsWith("`") && tok.length > 2) return <code key={i} className="font-mono text-[11px] text-accent bg-white/[0.06] px-1.5 py-0.5 rounded">{tok.slice(1, -1)}</code>;
-    return <span key={i}>{tok}</span>;
-  })}</>);
-}
-
 function MarkdownNarrative({ content }: { content: string }) {
-  const blocks = parseMarkdown(content);
-  return (
-    <div className="space-y-2">
-      {blocks.map((block, idx) => {
-        if (block.type === "h1") return <h1 key={idx} className="text-2xl font-bold tracking-tight text-text-primary mt-2 mb-4 gradient-text"><InlineText text={block.text} /></h1>;
-        if (block.type === "h2") return (
-          <h2 key={idx} className="text-lg font-semibold text-text-primary mt-10 mb-3 pt-2 flex items-center gap-2.5 border-t border-glass-border/30">
-            <span className="w-1 h-5 rounded-full bg-accent inline-block" /><InlineText text={block.text} />
-          </h2>
-        );
-        if (block.type === "h3") return <h3 key={idx} className="text-[15px] font-semibold text-text-secondary mt-6 mb-2"><InlineText text={block.text} /></h3>;
-        if (block.type === "hr") return <hr key={idx} className="border-glass-border my-8" />;
-        if (block.type === "table") return (
-          <div key={idx} className="overflow-x-auto my-6 rounded-xl border border-glass-border">
-            <table className="w-full">
-              <thead><tr className="border-b border-glass-border bg-white/[0.025]">
-                {block.headers.map((h, ci) => <th key={ci} className="py-3 px-5 text-left text-[10px] font-semibold uppercase tracking-[1.5px] text-text-muted whitespace-nowrap"><InlineText text={h} /></th>)}
-              </tr></thead>
-              <tbody>{block.rows.map((row, ri) => (
-                <tr key={ri} className="border-b border-glass-border/30 last:border-0 hover:bg-white/[0.02] transition-colors">
-                  {row.map((cell, ci) => <td key={ci} className={`py-3 px-5 text-[13px] ${ci === 0 ? "text-text-primary font-medium" : "text-text-secondary"}`}><InlineText text={cell} /></td>)}
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-        );
-        if (block.type === "list") return (
-          <ul key={idx} className="space-y-2 my-4 pl-1">{block.items.map((item, ii) => (
-            <li key={ii} className="flex items-start gap-3 text-[13px] text-text-secondary leading-relaxed">
-              <ChevronRight size={12} className="text-accent shrink-0 mt-1" /><InlineText text={item} />
-            </li>
-          ))}</ul>
-        );
-        if (block.type === "paragraph") return <p key={idx} className="text-[13px] text-text-secondary leading-[1.85] my-2.5"><InlineText text={block.text} /></p>;
-        return null;
-      })}
-    </div>
-  );
+  return <ReportMarkdown content={content} />;
 }
 
 // ── Tab config ───────────────────────────────────────────────────────────────

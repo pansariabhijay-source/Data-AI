@@ -284,6 +284,67 @@ def _model_table(models: list[dict], styles: dict) -> Table:
     return t
 
 
+def _inline_md(text: str) -> str:
+    """Escape a markdown cell/line and apply inline **bold** / `code` markup."""
+    import re
+    safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    safe = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", safe)
+    safe = re.sub(r"`([^`]+)`", r'<font face="Courier" color="#00b39a">\1</font>', safe)
+    return safe
+
+
+def _md_table(table_lines: list[str], styles: dict) -> Optional[Table]:
+    """Render a GFM markdown table (list of ``| a | b |`` lines) as a styled Table.
+
+    Previously the narrative appendix dumped these lines as raw text, so every
+    table showed as literal ``| ... |`` pipes in the PDF. This parses them into
+    real, themed ReportLab tables matching the rest of the report.
+    """
+    def parse_row(line: str) -> list[str]:
+        return [c.strip() for c in line.strip().strip("|").split("|")]
+
+    def is_sep(cells: list[str]) -> bool:
+        return bool(cells) and all(set(c) <= set(":- ") and "-" in c for c in cells)
+
+    rows_raw = [parse_row(l) for l in table_lines if l.strip().startswith("|")]
+    rows_raw = [r for r in rows_raw if not is_sep(r)]
+    if not rows_raw:
+        return None
+
+    ncols = max(len(r) for r in rows_raw)
+    head_style = ParagraphStyle(
+        "td_head", parent=styles["body"], fontName="Helvetica-Bold",
+        fontSize=8, textColor=MUTED, leading=11,
+    )
+    cell_style = ParagraphStyle(
+        "td_cell", parent=styles["body"], fontName="Helvetica",
+        fontSize=9, textColor=TEXT, leading=12,
+    )
+
+    data: list[list] = []
+    for ri, r in enumerate(rows_raw):
+        r = r + [""] * (ncols - len(r))
+        style = head_style if ri == 0 else cell_style
+        data.append([Paragraph(_inline_md(c), style) for c in r])
+
+    avail = PAGE_W - 2 * MARGIN_X
+    col_w = avail / ncols
+    t = Table(data, colWidths=[col_w] * ncols, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), SURFACE),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, ACCENT),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, SURFACE]),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.4, HAIRLINE),
+        ("BOX", (0, 0), (-1, -1), 0.5, HAIRLINE),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 7),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    return t
+
+
 def _shap_table(shap_items: list[tuple[str, float]], styles: dict) -> Table:
     rows: list[list[Any]] = [["Rank", "Feature", "Mean |SHAP|"]]
     for i, (feature, value) in enumerate(shap_items[:15], 1):
@@ -602,12 +663,30 @@ def build_pdf(
             "Auto-generated agent narrative for the run.",
             styles["lede"],
         ))
-        for line in markdown_report.split("\n"):
-            line = line.rstrip()
+        md_lines = markdown_report.split("\n")
+        j = 0
+        while j < len(md_lines):
+            line = md_lines[j].rstrip()
+            stripped = line.strip()
+
+            # GFM table block — collect consecutive pipe lines and render as a table
+            if stripped.startswith("|"):
+                table_lines = []
+                while j < len(md_lines) and md_lines[j].strip().startswith("|"):
+                    table_lines.append(md_lines[j])
+                    j += 1
+                tbl = _md_table(table_lines, styles)
+                if tbl is not None:
+                    story.append(Spacer(1, 4))
+                    story.append(KeepTogether(tbl))
+                    story.append(Spacer(1, 8))
+                continue
+
             if not line:
                 story.append(Spacer(1, 4))
-                continue
-            if line.startswith("# "):
+            elif stripped.startswith("---"):
+                story.append(Spacer(1, 2))
+            elif line.startswith("# "):
                 story.append(Paragraph(line[2:].strip(), ParagraphStyle(
                     "md_h1", parent=styles["body"], fontName="Helvetica-Bold",
                     fontSize=14, textColor=INK, leading=18, spaceBefore=10, spaceAfter=4,
@@ -624,19 +703,13 @@ def build_pdf(
                 )))
             elif line.startswith("- ") or line.startswith("* "):
                 story.append(Paragraph(
-                    f"• {line[2:].strip()}",
+                    f"• {_inline_md(line[2:].strip())}",
                     ParagraphStyle("md_li", parent=styles["body"], leftIndent=12,
                                    fontSize=9.5, leading=13),
                 ))
             else:
-                # Light inline formatting: **bold** and `code`
-                safe = (
-                    line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                )
-                import re
-                safe = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", safe)
-                safe = re.sub(r"`([^`]+)`", r'<font face="Courier" color="#00b39a">\1</font>', safe)
-                story.append(Paragraph(safe, styles["body"]))
+                story.append(Paragraph(_inline_md(line), styles["body"]))
+            j += 1
 
     doc.build(story)
     return buf.getvalue()

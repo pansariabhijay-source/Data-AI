@@ -156,15 +156,21 @@ DEFAULT_OVERFITTING_THRESHOLD: float = 0.15
 DEFAULT_MAX_FEATURE_COUNT: int = 500
 
 # Improvement
-DEFAULT_TUNING_ITERATIONS: int = 50
+# Per-round RandomizedSearchCV budget. 50 candidates x 5-fold CV = 250 fits PER
+# round, x DEFAULT_TUNING_MAX_ITERATIONS rounds — minutes of CPU on boosting
+# models for a gain that benchmarking showed is usually nil. Kept modest so the
+# improvement stage stays useful without dominating pipeline wall-time.
+DEFAULT_TUNING_ITERATIONS: int = 15
 DEFAULT_EARLY_STOPPING_ROUNDS: int = 10
 # Iterative tuning loop: stop early once the champion's validation selection score
 # reaches this target (0 disables the early stop); otherwise run up to
 # DEFAULT_TUNING_MAX_ITERATIONS rounds, stopping after DEFAULT_TUNING_PATIENCE
-# consecutive rounds without improvement.
+# consecutive rounds without improvement. Patience=1 means: give tuning one fair
+# round and, if it doesn't beat the champion (benchmarks show it rarely does),
+# stop instead of burning minutes of CPU on further fruitless rounds.
 DEFAULT_TUNING_TARGET_METRIC: float = 0.0
-DEFAULT_TUNING_MAX_ITERATIONS: int = 5
-DEFAULT_TUNING_PATIENCE: int = 2
+DEFAULT_TUNING_MAX_ITERATIONS: int = 3
+DEFAULT_TUNING_PATIENCE: int = 1
 
 # Data loading
 DEFAULT_CHUNK_SIZE: int = 50_000

@@ -35,6 +35,21 @@ from core.utils import ensure_directory
 logger = get_logger("improvement")
 
 
+def _is_tunable_base_model(model_name: str, problem_type: ProblemType, seed: int) -> bool:
+    """True only if ``model_name`` is a base model present in the registry.
+
+    Ensembles (VotingEnsemble/StackingEnsemble) and ``*_tuned`` champions are not
+    registered, so they cannot be hyperparameter-searched.
+    """
+    if not model_name:
+        return False
+    try:
+        build_default_registry(seed).get(problem_type, model_name)
+        return True
+    except Exception:
+        return False
+
+
 class ImprovementService:
     def __init__(self, config: ImprovementConfig, seed: int = 42) -> None:
         self._config = config
@@ -158,6 +173,18 @@ class ImprovementService:
         F1-optimal threshold (binary only) and the selection score used to compare
         rounds — or None if tuning could not run.
         """
+        # The champion may be an ensemble (VotingEnsemble/StackingEnsemble) or an
+        # already-tuned model — none of which exist in the base model registry, so
+        # there are no hyperparameters to grid-search. Detect that up front and
+        # skip gracefully instead of letting registry.get() raise and fail the
+        # whole improvement stage.
+        if not _is_tunable_base_model(model_name, problem_type, self._seed):
+            logger.info(
+                f"'{model_name}' is not a tunable base model (e.g. an ensemble); "
+                f"skipping hyperparameter search."
+            )
+            return None
+
         if self._config.use_optuna:
             tuned, params = self._try_optuna(model_name, X_train, y_train, X_val, y_val, problem_type, seed)
         else:
@@ -221,6 +248,13 @@ class ImprovementService:
 
         improvements: list[str] = []
 
+        # The model we attempt to tune is the champion. If it's an ensemble
+        # (VotingEnsemble/StackingEnsemble) it isn't a registry base model, so the
+        # tuning round below detects that and skips gracefully — the ensemble is
+        # already a blend of strong models, so there's no single set of
+        # hyperparameters to search. This is correct, not a failure.
+        tune_model = best
+
         # Baseline = the current champion's validation selection score (same metric
         # used to crown it during training, so the comparison is consistent).
         champ = next((r for r in state.model_results if r.is_best and r.metrics), None)
@@ -244,15 +278,18 @@ class ImprovementService:
             no_improve = 0
             for i in range(max_iter):
                 cand = self._run_one_tuning_round(
-                    best, X_train, y_train, X_val, y_val, problem_type, n_classes,
+                    tune_model, X_train, y_train, X_val, y_val, problem_type, n_classes,
                     seed=self._seed + 1 + i,
                 )
                 if cand is None:
-                    improvements.append(f"Round {i + 1}: tuning unavailable for {best}, stopping")
+                    improvements.append(
+                        f"Champion '{tune_model}' is an ensemble of already-strong models; "
+                        f"no single-model hyperparameters to tune — keeping it as-is."
+                    )
                     break
                 if cand["score"] > best_score + 1e-9:
                     best_score, best_cand, no_improve = cand["score"], cand, 0
-                    improvements.append(f"Round {i + 1}: {best} sel_score -> {best_score:.4f}")
+                    improvements.append(f"Round {i + 1}: {tune_model} sel_score -> {best_score:.4f}")
                     logger.info(improvements[-1])
                 else:
                     no_improve += 1
@@ -267,15 +304,20 @@ class ImprovementService:
         if best_cand is not None:
             metrics = best_cand["metrics"]
             new_primary = metrics.get(primary, 0.0)
-            model_path = artifact_dir / f"{best}_tuned_iter{state.retry_count}.joblib"
+            model_path = artifact_dir / f"{tune_model}_tuned_iter{state.retry_count}.joblib"
             joblib.dump(best_cand["model"], model_path)
             state.best_model_path = str(model_path)
             state.best_metric_value = new_primary
             state.best_threshold = best_cand["threshold"]
-            logger.info(f"Improvement kept: {best} sel_score {baseline_score:.4f}->{best_score:.4f} "
+            logger.info(f"Improvement kept: {tune_model} sel_score {baseline_score:.4f}->{best_score:.4f} "
                         f"({primary}={new_primary:.4f})")
+            # Promote the tuned model to champion: it beat the previous best, so it
+            # becomes the single is_best entry and the reported best_model_name.
+            for r in state.model_results:
+                r.is_best = False
+            state.best_model_name = f"{tune_model}_tuned"
             state.model_results.append(ModelResult(
-                model_name=f"{best}_tuned",
+                model_name=f"{tune_model}_tuned",
                 model_type=problem_type.value,
                 metrics=metrics, hyperparameters=best_cand["params"],
                 model_path=str(model_path), is_best=True, status="trained",

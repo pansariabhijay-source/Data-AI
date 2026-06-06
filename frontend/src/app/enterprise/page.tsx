@@ -40,6 +40,7 @@ export default function WorkspaceHome() {
   const user = useAuthStore((s) => s.user);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -61,6 +62,7 @@ export default function WorkspaceHome() {
 
   const handleFile = useCallback(async (file: File) => {
     setUploading(true);
+    setUploadError(null);
     try {
       const res = await uploadDataset(file);
       setDataset({
@@ -69,7 +71,7 @@ export default function WorkspaceHome() {
       });
       router.push("/enterprise/workflow");
     } catch (err) {
-      console.error("Upload failed", err);
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploading(false);
     }
@@ -166,8 +168,14 @@ export default function WorkspaceHome() {
             {uploading ? <Loader2 size={22} className="text-primary animate-spin" /> : <Upload size={22} className="text-primary" />}
           </div>
           <p className="text-[14px] font-semibold text-text-primary">{uploading ? "Uploading…" : "Upload dataset"}</p>
-          <p className="text-[11px] text-text-muted mt-1">{dataset ? `Replace ${dataset.filename}` : "Drop a CSV · TSV · TXT"}</p>
+          <p className="text-[11px] text-text-muted mt-1">{dataset ? `Replace ${dataset.filename}` : "Drop a CSV · TSV · TXT · up to 1 GB"}</p>
         </label>
+
+        {uploadError && (
+          <div className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/[0.05] px-4 py-3">
+            <span className="text-destructive text-[13px]">{uploadError}</span>
+          </div>
+        )}
       </motion.section>
 
       {/* Suggested actions */}

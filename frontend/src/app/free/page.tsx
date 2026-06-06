@@ -98,8 +98,8 @@ export default function FreeModePage() {
 
   const handleFile = useCallback(async (file: File) => {
     // Fail fast with a friendly message instead of streaming a huge file only
-    // for the backend to reject it. Mirror the backend MAX_UPLOAD_MB (300).
-    const MAX_MB = 300;
+    // for the backend to reject it. Mirror the backend MAX_UPLOAD_MB (1024).
+    const MAX_MB = 1024;
     if (file.size > MAX_MB * 1024 * 1024) {
       setError(`File is ${(file.size / 1024 / 1024).toFixed(0)} MB — the limit is ${MAX_MB} MB.`);
       return;

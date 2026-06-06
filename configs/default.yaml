@@ -54,7 +54,7 @@ error_detection:
   max_feature_count: 500
 
 improvement:
-  tuning_iterations: 50
+  tuning_iterations: 15   # per-round search budget (was 50 — minutes of fruitless CPU)
   early_stopping_rounds: 10
   use_optuna: false
 

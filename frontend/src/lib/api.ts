@@ -1,5 +1,25 @@
 const API_BASE = "/api";
 
+// Hard cap on client-side upload size (mirror of backend MAX_UPLOAD_MB).
+const MAX_UPLOAD_MB = 1024;
+
+/**
+ * Origin of the FastAPI backend for requests that must bypass the Next.js dev
+ * proxy. The proxy buffers the entire request body in memory and resets the
+ * connection once it exceeds its size cap (ECONNRESET, surfaced to the user as
+ * a misleading "backend unavailable"). Large dataset uploads therefore go
+ * straight to the backend, which streams them to disk and has CORS configured
+ * for this origin. In production (single gateway) this is "" => same-origin.
+ */
+function backendOrigin(): string {
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) return process.env.NEXT_PUBLIC_BACKEND_URL;
+  if (typeof window !== "undefined") {
+    const h = window.location.hostname;
+    if (h === "localhost" || h === "127.0.0.1") return `http://${h}:8000`;
+  }
+  return "";
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 
 export interface UploadResponse {
@@ -170,9 +190,26 @@ export async function setWorkspaceMode(mode: "free" | "enterprise"): Promise<voi
 // ── Platform Endpoints ─────────────────────────────────────────────────────
 
 export async function uploadDataset(file: File): Promise<UploadResponse> {
+  // Fail fast with a clear message instead of streaming a huge body only to be
+  // rejected (or, worse, truncated by a proxy → confusing connection error).
+  if (file.size === 0) throw new Error("That file is empty.");
+  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+    throw new Error(
+      `File is ${(file.size / 1024 / 1024).toFixed(0)} MB — the limit is ${MAX_UPLOAD_MB} MB.`,
+    );
+  }
   const form = new FormData();
   form.append("file", file);
-  const res = await authFetch(`${API_BASE}/upload`, { method: "POST", body: form });
+  // Bypass the Next.js dev proxy for the (potentially large) upload body.
+  const url = `${backendOrigin()}${API_BASE}/upload`;
+  let res: Response;
+  try {
+    res = await authFetch(url, { method: "POST", body: form });
+  } catch {
+    throw new Error(
+      "Could not reach the backend. Make sure it is running (it starts with the frontend via `npm run dev`), then try again.",
+    );
+  }
   return handleResponse(res, "Upload failed");
 }
 
