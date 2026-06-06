@@ -70,10 +70,29 @@ def _warm_up_viz() -> None:
 from contextlib import asynccontextmanager
 
 
+def _active_run_ids() -> set[str]:
+    """Run IDs that are currently in flight (must never be cleaned up)."""
+    return {
+        rid for rid, info in _active_runs.items()
+        if isinstance(info, dict) and info.get("status") in ("starting", "running")
+    }
+
+
+def _run_artifact_cleanup() -> None:
+    """Best-effort disk hygiene — enforce the artifact-retention policy."""
+    try:
+        from core.maintenance import cleanup_artifacts
+        cleanup_artifacts(active_run_ids=_active_run_ids())
+    except Exception:
+        logger.warning("Artifact cleanup failed", exc_info=True)
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     # Startup
     _warm_up_viz()
+    # Reclaim disk from old runs at boot so a long-idle install self-heals.
+    threading.Thread(target=_run_artifact_cleanup, daemon=True).start()
     yield
     # Shutdown (nothing to clean up — background runs are daemon threads)
 
@@ -1154,6 +1173,10 @@ def _run_pipeline_background(
                 db.commit()
         _persist_run(run_id)
 
+    # Enforce the artifact-retention policy now that this run has finished, so
+    # disk usage stays bounded across many runs.
+    _run_artifact_cleanup()
+
 
 def _run_workflow_background(
     run_id: str, data_path: str, target_column: Optional[str], agent_list: list[str],
@@ -1242,6 +1265,8 @@ def _run_workflow_background(
                 history.result_summary = json.dumps({"error": str(e)})
                 db.commit()
         _persist_run(run_id)
+
+    _run_artifact_cleanup()
 
 
 def _run_single_agent_background(run_id: str, agent_name: str) -> None:
