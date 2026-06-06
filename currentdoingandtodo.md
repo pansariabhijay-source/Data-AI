@@ -18,6 +18,12 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Pipeline / ML
+- **Bounded SHAP KernelExplainer cost** (`agents/finalization/tools.py`,
+  `SHAP_KERNEL_NSAMPLES`, default 100). Tree/linear champions use the fast exact
+  explainers, but ensembles/SVC fall to the model-agnostic KernelExplainer,
+  which defaulted to nsamples="auto" (~2·n_features+2048 coalitions/row) ≈ 39s —
+  the cause of the ~49s finalization stage. Capping nsamples=100 keeps the same
+  top-feature ranking (verified) at **39s → 4.3s (9× faster)**.
 - **Mutual-information feature ranking now runs on a row sample**
   (`agents/feature_engineering/tools.py`, `MI_SAMPLE_ROWS`, default 50k).
   Profiling showed `select_k_best` (mutual_info) was **19.5s of ~21.5s** of
@@ -129,6 +135,7 @@ Newest changes at the top of each section.
 | `MAX_UPLOAD_MB` | 1024 | Upload size cap |
 | `VIZ_SAMPLE_ROWS` | 50000 | Rows used to render charts (upload + per-agent) |
 | `MI_SAMPLE_ROWS` | 50000 | Rows used for mutual-info feature ranking (0 = off) |
+| `SHAP_KERNEL_NSAMPLES` | 100 | Coalition budget for SHAP KernelExplainer (ensembles/SVC) |
 | `ARTIFACT_MAX_RUNS` | 25 | Max run dirs kept |
 | `ARTIFACT_MIN_KEEP` | 5 | Always-kept newest runs |
 | `ARTIFACT_RETENTION_DAYS` | 30 | Age cap for runs/uploads |

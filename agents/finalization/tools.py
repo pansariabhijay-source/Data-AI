@@ -5,6 +5,7 @@ Finalization Tool — save artifacts, generate reports, and SHAP explanations.
 from __future__ import annotations
 
 import json
+import os
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,15 @@ from core.state import ErrorReport, PipelineState
 from core.utils import ensure_directory, get_timestamp, safe_json_serialize
 
 logger = get_logger("finalization")
+
+# KernelExplainer (used for non-tree/non-linear champions like ensembles & SVC)
+# defaults to nsamples="auto" = 2*n_features+2048 coalition evaluations per row,
+# which is ~40s for an ensemble. The mean |SHAP| ranking is stable with far
+# fewer samples, so bound it. Override via SHAP_KERNEL_NSAMPLES.
+try:
+    _SHAP_KERNEL_NSAMPLES = int(os.environ.get("SHAP_KERNEL_NSAMPLES", "100"))
+except (TypeError, ValueError):
+    _SHAP_KERNEL_NSAMPLES = 100
 
 
 class FinalizationService:
@@ -168,6 +178,7 @@ class FinalizationService:
             # calls, which can take minutes on non-tree models (e.g. SVC). Bound its
             # work so finalization can never appear to hang.
             X_explain = X
+            use_kernel = False
             try:
                 explainer = shap.TreeExplainer(model)
             except Exception:
@@ -178,8 +189,16 @@ class FinalizationService:
                     explainer = shap.KernelExplainer(model.predict, background)
                     # Explain a capped subset — mean |SHAP| is stable on a sample.
                     X_explain = X.sample(min(100, len(X)), random_state=42)
+                    use_kernel = True
 
-            shap_values = explainer.shap_values(X_explain)
+            # TreeExplainer/LinearExplainer are exact and fast; only the
+            # model-agnostic KernelExplainer needs its coalition budget bounded.
+            if use_kernel:
+                shap_values = explainer.shap_values(
+                    X_explain, nsamples=_SHAP_KERNEL_NSAMPLES, silent=True
+                )
+            else:
+                shap_values = explainer.shap_values(X_explain)
             X = X_explain
 
             # Save mean absolute SHAP values
