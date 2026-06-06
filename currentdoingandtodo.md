@@ -18,6 +18,13 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Pipeline / ML
+- **Mutual-information feature ranking now runs on a row sample**
+  (`agents/feature_engineering/tools.py`, `MI_SAMPLE_ROWS`, default 50k).
+  Profiling showed `select_k_best` (mutual_info) was **19.5s of ~21.5s** of
+  feature_engineering on 220k rows — it's O(n log n) kNN density estimation, used
+  only to RANK features. A sample preserves the ranking of the informative
+  features (only zero-MI noise columns reshuffle, verified) and selection still
+  runs on the full frame. Measured: select_k_best 19.5s→5.1s, FE ~21.5s→~7s.
 - **Halved the forest tree counts** (`core/model_registry.py`): RandomForest &
   ExtraTrees defaulted to **300 estimators with no early stopping** — profiling
   showed RandomForest alone was 58.7s of an ~85s model_training stage on 100k
@@ -120,7 +127,8 @@ Newest changes at the top of each section.
 | `CV_SELECTION_FOLDS` | 0 | k-fold CV champion selection (0 = off; 4 enables) |
 | `CV_SELECTION_MAX_ROWS` | 40000 | Row cap for CV ranking sample |
 | `MAX_UPLOAD_MB` | 1024 | Upload size cap |
-| `VIZ_SAMPLE_ROWS` | 50000 | Rows used to render upload charts |
+| `VIZ_SAMPLE_ROWS` | 50000 | Rows used to render charts (upload + per-agent) |
+| `MI_SAMPLE_ROWS` | 50000 | Rows used for mutual-info feature ranking (0 = off) |
 | `ARTIFACT_MAX_RUNS` | 25 | Max run dirs kept |
 | `ARTIFACT_MIN_KEEP` | 5 | Always-kept newest runs |
 | `ARTIFACT_RETENTION_DAYS` | 30 | Age cap for runs/uploads |

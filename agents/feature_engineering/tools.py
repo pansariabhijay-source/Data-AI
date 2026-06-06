@@ -5,6 +5,7 @@ Feature Engineering Tool — encoding, scaling, feature generation, and selectio
 from __future__ import annotations
 
 import json
+import os
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,17 @@ from core.state import ErrorReport, FeatureEngineeringSummary, PipelineState
 from core.utils import ensure_directory
 
 logger = get_logger("feature_engineering")
+
+# Mutual-information feature ranking is O(n log n) (kNN density estimation) and
+# dominates feature_engineering time on large data. It's only used to RANK
+# features, and a row sample preserves the ranking of the genuinely informative
+# columns (only zero-MI noise columns reshuffle). Cap the rows fed to MI here;
+# selection is still applied to the full frame. Override via MI_SAMPLE_ROWS
+# (0 disables sampling).
+try:
+    _MI_SAMPLE_ROWS = int(os.environ.get("MI_SAMPLE_ROWS", "50000"))
+except (TypeError, ValueError):
+    _MI_SAMPLE_ROWS = 50000
 
 
 class FeatureEngineeringService:
@@ -179,13 +191,22 @@ class FeatureEngineeringService:
         X = df[numeric_cols].fillna(0)
         y = df[target]
 
+        # Rank on a row sample to bound MI cost on large data (selection below is
+        # still applied to the full frame). The sample preserves the ordering of
+        # the informative features; only zero-MI noise columns reshuffle.
+        if _MI_SAMPLE_ROWS > 0 and len(X) > _MI_SAMPLE_ROWS:
+            samp = np.random.default_rng(42).choice(len(X), size=_MI_SAMPLE_ROWS, replace=False)
+            X_mi, y_mi = X.iloc[samp], y.iloc[samp]
+        else:
+            X_mi, y_mi = X, y
+
         try:
             if problem_type == ProblemType.CLASSIFICATION:
                 from sklearn.feature_selection import mutual_info_classif
-                scores = mutual_info_classif(X, y, random_state=42)
+                scores = mutual_info_classif(X_mi, y_mi, random_state=42)
             else:
                 from sklearn.feature_selection import mutual_info_regression
-                scores = mutual_info_regression(X, y, random_state=42)
+                scores = mutual_info_regression(X_mi, y_mi, random_state=42)
 
             importance = dict(zip(numeric_cols, [float(s) for s in scores]))
             sorted_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)
