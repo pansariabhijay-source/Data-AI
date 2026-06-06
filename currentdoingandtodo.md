@@ -18,6 +18,14 @@ Newest changes at the top of each section.
   of dataset size (was re-rendering the free charts on the full frame).
 
 ### Pipeline / ML
+- **Halved the forest tree counts** (`core/model_registry.py`): RandomForest &
+  ExtraTrees defaulted to **300 estimators with no early stopping** — profiling
+  showed RandomForest alone was 58.7s of an ~85s model_training stage on 100k
+  rows. Cut to 150 (RandomForestRegressor was already 100). Measured: total
+  model fitting ~93s→49s, RF 58.7s→29.1s, with AUC change <0.001 (noise) and F1
+  unchanged. Boosting models (which usually win) were never the bottleneck.
+  Also dropped LogisticRegression's no-op `n_jobs` (silences a per-run sklearn
+  FutureWarning).
 - **CV-based champion selection — implemented as an OPT-IN** (`agents/training/tools.py`,
   `_cv_selection_scores`, off by default: `CV_SELECTION_FOLDS=0`). Ranks base
   models by k-fold CV mean − std-penalty instead of a single noisy val split.

@@ -87,7 +87,9 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
     registry.register(ModelSpec(
         name="LogisticRegression", problem_type=ProblemType.CLASSIFICATION,
         factory=LogisticRegression,
-        default_params={"max_iter": 1000, "random_state": seed, "n_jobs": -1,
+        # n_jobs intentionally omitted: it's a no-op for LogisticRegression as of
+        # sklearn 1.8 and emits a FutureWarning on every run.
+        default_params={"max_iter": 1000, "random_state": seed,
                         "class_weight": "balanced"},
         search_space={"C": [0.01, 0.1, 1.0, 10.0], "penalty": ["l1", "l2"], "solver": ["liblinear", "saga"]},
         requires_scaling=True, supports_probabilities=True,
@@ -95,7 +97,7 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
     registry.register(ModelSpec(
         name="RandomForestClassifier", problem_type=ProblemType.CLASSIFICATION,
         factory=RandomForestClassifier,
-        default_params={"n_estimators": 300, "random_state": seed, "n_jobs": -1,
+        default_params={"n_estimators": 150, "random_state": seed, "n_jobs": -1,
                         "class_weight": "balanced"},
         search_space={"n_estimators": [100, 200, 300, 500], "max_depth": [5, 10, 20, None], "min_samples_split": [2, 5, 10]},
         supports_probabilities=True,
@@ -112,7 +114,7 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
     registry.register(ModelSpec(
         name="ExtraTreesClassifier", problem_type=ProblemType.CLASSIFICATION,
         factory=ExtraTreesClassifier,
-        default_params={"n_estimators": 300, "random_state": seed, "n_jobs": -1,
+        default_params={"n_estimators": 150, "random_state": seed, "n_jobs": -1,
                         "class_weight": "balanced"},
         search_space={"n_estimators": [200, 300, 500], "max_depth": [10, 20, None],
                       "min_samples_split": [2, 5, 10]},
@@ -192,7 +194,7 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
     registry.register(ModelSpec(
         name="ExtraTreesRegressor", problem_type=ProblemType.REGRESSION,
         factory=ExtraTreesRegressor,
-        default_params={"n_estimators": 300, "random_state": seed, "n_jobs": -1},
+        default_params={"n_estimators": 150, "random_state": seed, "n_jobs": -1},
         search_space={"n_estimators": [200, 300, 500], "max_depth": [10, 20, None], "min_samples_split": [2, 5, 10]},
     ))
     registry.register(ModelSpec(
