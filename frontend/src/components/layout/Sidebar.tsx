@@ -92,7 +92,7 @@ export default function Sidebar() {
               <Icon
                 size={18}
                 strokeWidth={1.75}
-                className={`shrink-0 ${isActive ? "text-primary" : ""}`}
+                className={`shrink-0 ${isActive ? "text-text-primary" : ""}`}
               />
               <AnimatePresence>
                 {!sidebarCollapsed && (
