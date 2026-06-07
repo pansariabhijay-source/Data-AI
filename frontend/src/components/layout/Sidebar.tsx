@@ -46,13 +46,12 @@ export default function Sidebar() {
   return (
     <motion.aside
       initial={false}
-      animate={{ width: sidebarCollapsed ? 72 : 248 }}
+      animate={{ width: sidebarCollapsed ? 68 : 232 }}
       transition={{ duration: 0.3, ease: [0.25, 0.4, 0, 1] }}
-      className="fixed left-0 top-0 bottom-0 z-40 flex flex-col bg-void/50 backdrop-blur-2xl border-r border-white/[0.06]"
-      style={{ paddingTop: 76 }}
+      className="fixed left-4 top-[80px] bottom-4 z-40 flex flex-col rounded-3xl glass-panel overflow-hidden px-2.5 pt-5 pb-4"
     >
       {/* Workspace label */}
-      <div className={`mb-6 ${sidebarCollapsed ? "px-0" : "px-5"}`}>
+      <div className={`mb-6 ${sidebarCollapsed ? "px-1" : "px-3"}`}>
         <AnimatePresence mode="wait">
           {!sidebarCollapsed && (
             <motion.div

@@ -36,8 +36,8 @@ const TIERS: {
     tagline: "Browser quick-start",
     price: "$0",
     priceNote: "forever",
-    accent: "#2dd4bf",
-    glow: "rgba(45,212,191,0.16)",
+    accent: "#d3d8e1",
+    glow: "rgba(211,216,225,0.14)",
     Icon: Sparkles,
     features: [
       "Full 8-agent autonomous pipeline",
@@ -53,8 +53,8 @@ const TIERS: {
     tagline: "The full command center",
     price: "Custom",
     priceNote: "talk to us",
-    accent: "#818cf8",
-    glow: "rgba(129,140,248,0.18)",
+    accent: "#aab3c4",
+    glow: "rgba(170,179,196,0.16)",
     Icon: Crown,
     features: [
       "Visual workflow builder & agent console",

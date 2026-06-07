@@ -115,17 +115,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Enterprise layout with Stitch sidebar + topbar
+  // Enterprise layout — "Mission Control": cosmic atmosphere + floating sidebar
   return (
     <div className="flex min-h-screen">
-      <div className="mesh-bg" />
+      <div className="mission-atmos" />
+      <div className="starfield" />
       <div className="grid-overlay" />
       <Navbar />
       <Sidebar />
       <main
         className="flex-1 transition-all duration-300 relative z-10 pt-16"
         style={{
-          marginLeft: sidebarCollapsed ? 64 : 256,
+          marginLeft: sidebarCollapsed ? 100 : 264,
         }}
       >
         {children}

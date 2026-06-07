@@ -35,24 +35,24 @@
   --color-glass-active: rgba(255, 255, 255, 0.10);
   --color-glass-rim: rgba(255, 255, 255, 0.14);
 
-  /* ── PRIMARY ACCENT — Indigo (Linear) ── */
-  --color-primary: #6366f1;
-  --color-primary-container: #4f46e5;
-  --color-primary-dim: #818cf8;
-  --color-primary-fixed: #c7d2fe;
-  --color-primary-glow: rgba(99, 102, 241, 0.18);
-  --color-primary-glow-strong: rgba(79, 70, 229, 0.40);
-  --color-on-primary: #ffffff;
+  /* ── PRIMARY ACCENT — monochrome cool-grey (no brand hue) ── */
+  --color-primary: #b4bcca;
+  --color-primary-container: #9aa3b3;
+  --color-primary-dim: #c8ced9;
+  --color-primary-fixed: #dfe3ea;
+  --color-primary-glow: rgba(190, 200, 218, 0.14);
+  --color-primary-glow-strong: rgba(190, 200, 218, 0.28);
+  --color-on-primary: #07141d;
 
-  /* ── SECONDARY — Soft Indigo ── */
-  --color-secondary: #a5b4fc;
-  --color-secondary-container: #4f46e5;
-  --color-on-secondary: #1e1b4b;
+  /* ── SECONDARY — light cool-grey ── */
+  --color-secondary: #c8ced9;
+  --color-secondary-container: #9aa3b3;
+  --color-on-secondary: #07141d;
 
-  /* ── TERTIARY — Violet ── */
-  --color-tertiary: #c4b5fd;
-  --color-tertiary-container: #8b5cf6;
-  --color-on-tertiary: #2e1065;
+  /* ── TERTIARY — light cool-grey ── */
+  --color-tertiary: #cdd2dc;
+  --color-tertiary-container: #9aa3b3;
+  --color-on-tertiary: #07141d;
 
   /* ── SEMANTIC COLORS ── */
   --color-success: #34d399;
@@ -72,32 +72,32 @@
   --color-text-muted: #5b6472;
   --color-text-ghost: #353b46;
 
-  /* ── AGENT PIPELINE PALETTE — refined indigo/violet spectrum ── */
-  --color-agent-ingest: #818cf8;
-  --color-agent-clean: #6366f1;
-  --color-agent-engineer: #8b5cf6;
-  --color-agent-split: #a78bfa;
-  --color-agent-train: #c4b5fd;
-  --color-agent-audit: #f0abfc;
-  --color-agent-improve: #2dd4bf;
-  --color-agent-finalize: #38bdf8;
+  /* ── AGENT PIPELINE PALETTE — monochrome ramp; stages read by lightness ── */
+  --color-agent-ingest: #e6e9ef;
+  --color-agent-clean: #d3d8e1;
+  --color-agent-engineer: #c2c8d4;
+  --color-agent-split: #b4bcca;
+  --color-agent-train: #c8ced9;
+  --color-agent-audit: #d8dce4;
+  --color-agent-improve: #bcc3d0;
+  --color-agent-finalize: #eef1f6;
 
-  /* ── FREE TIER ACCENT — Muted Teal ── */
-  --color-accent: #2dd4bf;
-  --color-accent-bright: #5eead4;
-  --color-accent-muted: #0d9488;
-  --color-accent-glow: rgba(45, 212, 191, 0.30);
-  --color-cyan: #2dd4bf;
+  /* ── FREE TIER ACCENT — monochrome cool-grey ── */
+  --color-accent: #b4bcca;
+  --color-accent-bright: #d3d8e1;
+  --color-accent-muted: #828b9b;
+  --color-accent-glow: rgba(190, 200, 218, 0.22);
+  --color-cyan: #b4bcca;
 
-  /* ── ENTERPRISE (PRO) ACCENT — Indigo / Violet ── */
-  --color-pro: #818cf8;
-  --color-pro-bright: #a78bfa;
-  --color-pro-muted: #6366f1;
-  --color-pro-gold: #38bdf8;
-  --color-pro-gold-bright: #7dd3fc;
-  --color-pro-glow: rgba(129, 140, 248, 0.35);
-  --color-pro-surface: #11142a;
-  --color-pro-glass-border: rgba(129, 140, 248, 0.18);
+  /* ── ENTERPRISE (PRO) ACCENT — monochrome cool-grey ── */
+  --color-pro: #b4bcca;
+  --color-pro-bright: #d3d8e1;
+  --color-pro-muted: #9aa3b3;
+  --color-pro-gold: #cdd3dd;
+  --color-pro-gold-bright: #e6e9ef;
+  --color-pro-glow: rgba(190, 200, 218, 0.22);
+  --color-pro-surface: #07242f;
+  --color-pro-glass-border: rgba(255, 255, 255, 0.12);
 
   /* ── LAYOUT ── */
   --sidebar-width: 256px;
@@ -109,7 +109,7 @@
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.30), 0 1px 2px rgba(0, 0, 0, 0.22);
   --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.22);
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.42), 0 4px 12px rgba(0, 0, 0, 0.26);
-  --shadow-primary: 0 8px 28px rgba(99, 102, 241, 0.22);
+  --shadow-primary: 0 8px 28px rgba(0, 0, 0, 0.30);
 
   /* ── MOTION — one easing curve everywhere, for a handcrafted feel ── */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -138,7 +138,7 @@ body {
 }
 
 ::selection {
-  background: rgba(99, 102, 241, 0.28);
+  background: rgba(255, 255, 255, 0.20);
   color: #ffffff;
 }
 
@@ -184,9 +184,9 @@ body {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 100% 60% at 50% 0%, rgba(99, 102, 241, 0.10), transparent 60%),
-    radial-gradient(ellipse 50% 50% at 15% 85%, rgba(45, 212, 191, 0.06), transparent),
-    radial-gradient(ellipse 50% 50% at 85% 70%, rgba(129, 140, 248, 0.06), transparent);
+    radial-gradient(ellipse 100% 60% at 50% 0%, rgba(190, 205, 225, 0.06), transparent 60%),
+    radial-gradient(ellipse 50% 50% at 15% 85%, rgba(160, 180, 205, 0.035), transparent),
+    radial-gradient(ellipse 50% 50% at 85% 70%, rgba(190, 205, 225, 0.035), transparent);
 }
 
 /* Slow aurora wash for hero / mission control backdrops */
@@ -196,11 +196,54 @@ body {
   pointer-events: none;
   opacity: 0.55;
   background:
-    radial-gradient(ellipse 40% 40% at 20% 30%, rgba(99, 102, 241, 0.14), transparent 70%),
-    radial-gradient(ellipse 45% 45% at 80% 40%, rgba(129, 140, 248, 0.12), transparent 70%),
-    radial-gradient(ellipse 40% 40% at 50% 90%, rgba(45, 212, 191, 0.08), transparent 70%);
+    radial-gradient(ellipse 40% 40% at 20% 30%, rgba(190, 205, 225, 0.08), transparent 70%),
+    radial-gradient(ellipse 45% 45% at 80% 40%, rgba(170, 188, 212, 0.07), transparent 70%),
+    radial-gradient(ellipse 40% 40% at 50% 90%, rgba(190, 205, 225, 0.05), transparent 70%);
   background-size: 200% 200%;
   animation: aurora-drift 24s ease-in-out infinite;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   MISSION CONTROL ATMOSPHERE — cosmic navy + starfield (enterprise)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.mission-atmos {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% -8%, rgba(60, 110, 170, 0.20), transparent 46%),
+    radial-gradient(ellipse 70% 50% at 88% 8%, rgba(70, 125, 185, 0.08), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 10% 100%, rgba(40, 90, 140, 0.06), transparent 60%),
+    linear-gradient(180deg, #04263a 0%, #03182700 0%, #021622 60%, #03141d 100%);
+}
+
+/* Subtle, slowly twinkling starfield — repeats a hand-placed star tile. */
+.starfield {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(1.5px 1.5px at 25px 35px, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(1px 1px at 80px 120px, rgba(255, 255, 255, 0.55), transparent),
+    radial-gradient(1px 1px at 160px 60px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1.5px 1.5px at 210px 180px, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(1px 1px at 120px 220px, rgba(255, 255, 255, 0.45), transparent),
+    radial-gradient(1px 1px at 300px 100px, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(1.5px 1.5px at 340px 250px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 40px 280px, rgba(255, 255, 255, 0.4), transparent);
+  background-repeat: repeat;
+  background-size: 380px 320px;
+  animation: twinkle 7s ease-in-out infinite;
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.65; }
 }
 
 
@@ -273,19 +316,19 @@ body {
    GLOW EFFECTS
    ═══════════════════════════════════════════════════════════════════ */
 
+/* Glows are now neutral light — depth without brand hue. */
 .glow-primary {
   box-shadow:
-    0 0 60px rgba(99, 102, 241, 0.12),
-    0 0 120px rgba(79, 70, 229, 0.06);
+    0 0 60px rgba(190, 200, 218, 0.07),
+    0 0 120px rgba(190, 200, 218, 0.04);
 }
 
-/* Legacy "gold" hooks remapped to electric blue so existing markup stays on-brand */
 .glow-gold {
-  box-shadow: 0 4px 18px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.30);
 }
 
 .glow-gold-strong {
-  box-shadow: 0 6px 24px rgba(79, 70, 229, 0.55);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 
 .glow-success {
@@ -293,11 +336,11 @@ body {
 }
 
 .glow-soft {
-  box-shadow: 0 0 30px rgba(99, 102, 241, 0.10);
+  box-shadow: 0 0 30px rgba(190, 200, 218, 0.06);
 }
 
 .active-glow:focus-within {
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12), 0 0 24px rgba(99, 102, 241, 0.18);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08), 0 0 24px rgba(190, 200, 218, 0.12);
 }
 
 
@@ -305,15 +348,16 @@ body {
    GRADIENT TEXT
    ═══════════════════════════════════════════════════════════════════ */
 
+/* Monochrome gradient text — white → cool-grey, no brand hue. */
 .gradient-text {
-  background: linear-gradient(135deg, #6366f1 0%, #818cf8 45%, #a78bfa 100%);
+  background: linear-gradient(135deg, #ffffff 0%, #c8ced9 50%, #aab3c4 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .gradient-text-hero {
-  background: linear-gradient(120deg, #eef2fb 0%, #6366f1 42%, #a78bfa 62%, #eef2fb 100%);
+  background: linear-gradient(120deg, #ffffff 0%, #aab3c4 42%, #d3d8e1 62%, #ffffff 100%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -322,22 +366,21 @@ body {
 }
 
 .gradient-text-brand {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 50%, #a5b4fc 100%);
+  background: linear-gradient(135deg, #ffffff 0%, #b4bcca 50%, #dfe3ea 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .gradient-text-secondary {
-  background: linear-gradient(135deg, #a5b4fc 0%, #6366f1 50%, #c7d2fe 100%);
+  background: linear-gradient(135deg, #dfe3ea 0%, #aab3c4 50%, #eef1f6 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Enterprise (Pro) — indigo/violet gradient text */
 .gradient-text-pro {
-  background: linear-gradient(135deg, #a78bfa 0%, #818cf8 45%, #c4b5fd 100%);
+  background: linear-gradient(135deg, #ffffff 0%, #b4bcca 45%, #d3d8e1 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -348,8 +391,8 @@ body {
    PRIMARY CTA (electric gradient)
    ═══════════════════════════════════════════════════════════════════ */
 
-/* Primary action — a calm, solid rounded-full pill (matches the landing's
-   tier CTAs). Restrained: no neon glow, hover lifts via a subtle scale. */
+/* Primary action — a solid near-white rounded-full pill with dark text.
+   Monochrome and high-contrast, like the landing's tier CTAs. */
 .gold-gradient-btn,
 .btn-primary {
   display: inline-flex;
@@ -359,9 +402,9 @@ body {
   border-radius: 9999px;
   font-size: 14px;
   font-weight: 600;
-  background: linear-gradient(135deg, #6f74f2 0%, #5b56e6 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 6px 18px rgba(79, 70, 229, 0.22);
-  color: #ffffff;
+  background: #f1f3f7;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  color: #07141d;
   border: none;
   cursor: pointer;
   transition: transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out), filter 0.3s var(--ease-out);
@@ -369,7 +412,8 @@ body {
 
 .gold-gradient-btn:hover,
 .btn-primary:hover {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 24px rgba(79, 70, 229, 0.3);
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
   transform: scale(1.025);
 }
 
@@ -404,25 +448,26 @@ body {
   transform: scale(1.025);
 }
 
-/* Enterprise primary button */
+/* Enterprise primary button — monochrome near-white pill. */
 .btn-pro-primary {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 12px 24px;
-  border-radius: 14px;
+  border-radius: 9999px;
   font-size: 13px;
   font-weight: 700;
-  color: #ffffff;
-  border: 1px solid rgba(129, 140, 248, 0.4);
-  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
-  box-shadow: 0 6px 22px rgba(129, 140, 248, 0.3);
+  color: #07141d;
+  border: none;
+  background: #f1f3f7;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.25, 0.4, 0, 1);
 }
 .btn-pro-primary:hover {
-  box-shadow: 0 8px 30px rgba(129, 140, 248, 0.5);
-  transform: translateY(-1px);
+  background: #ffffff;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.34);
+  transform: scale(1.025);
 }
 
 
@@ -456,8 +501,8 @@ body {
 }
 
 @keyframes node-glow {
-  0%, 100% { filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.35)); }
-  50% { filter: drop-shadow(0 0 18px rgba(99, 102, 241, 0.7)); }
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(210, 220, 235, 0.30)); }
+  50% { filter: drop-shadow(0 0 18px rgba(210, 220, 235, 0.55)); }
 }
 
 @keyframes flow {
@@ -525,10 +570,10 @@ body {
 .badge-success { background: rgba(52, 211, 153, 0.10); color: #34d399; border-color: rgba(52,211,153,0.18); }
 .badge-warning { background: rgba(251, 191, 36, 0.10); color: #fbbf24; border-color: rgba(251,191,36,0.18); }
 .badge-error { background: rgba(251, 113, 133, 0.10); color: #fb7185; border-color: rgba(251,113,133,0.18); }
-.badge-info { background: rgba(56, 189, 248, 0.10); color: #38bdf8; border-color: rgba(56,189,248,0.18); }
-.badge-primary { background: rgba(99, 102, 241, 0.10); color: #6366f1; border-color: rgba(77,141,255,0.18); }
-.badge-accent { background: rgba(45, 212, 191, 0.10); color: #2dd4bf; border-color: rgba(45,212,191,0.18); }
-.badge-processing { background: rgba(99, 102, 241, 0.10); color: #6366f1; border-color: rgba(77,141,255,0.18); }
+.badge-info { background: rgba(255,255,255,0.06); color: var(--color-text-secondary); border-color: rgba(255,255,255,0.12); }
+.badge-primary { background: rgba(255,255,255,0.06); color: var(--color-text-secondary); border-color: rgba(255,255,255,0.12); }
+.badge-accent { background: rgba(255,255,255,0.06); color: var(--color-text-secondary); border-color: rgba(255,255,255,0.12); }
+.badge-processing { background: rgba(255,255,255,0.06); color: var(--color-text-secondary); border-color: rgba(255,255,255,0.12); }
 
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -708,8 +753,8 @@ body {
   background: linear-gradient(
     135deg,
     transparent 20%,
-    rgba(99, 102, 241, 0.45) 40%,
-    rgba(167, 139, 250, 0.30) 60%,
+    rgba(255, 255, 255, 0.40) 40%,
+    rgba(190, 200, 218, 0.22) 60%,
     transparent 80%
   );
   background-size: 200% 200%;
@@ -730,8 +775,8 @@ body {
   background: linear-gradient(
     135deg,
     transparent 20%,
-    rgba(129, 140, 248, 0.5) 40%,
-    rgba(167, 139, 250, 0.32) 60%,
+    rgba(255, 255, 255, 0.45) 40%,
+    rgba(190, 200, 218, 0.24) 60%,
     transparent 80%
   );
   background-size: 200% 200%;
@@ -749,16 +794,17 @@ body {
 
 .glow-accent {
   box-shadow:
-    0 0 40px rgba(45, 212, 191, 0.12),
-    0 0 80px rgba(45, 212, 191, 0.05);
+    0 0 40px rgba(190, 200, 218, 0.07),
+    0 0 80px rgba(190, 200, 218, 0.04);
 }
 
 .pro-glass {
-  background: linear-gradient(135deg, rgba(129, 140, 248, 0.07), rgba(167, 139, 250, 0.02));
-  backdrop-filter: blur(26px);
-  -webkit-backdrop-filter: blur(26px);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
   border: 1px solid var(--color-pro-glass-border);
-  border-radius: 18px;
+  border-radius: 20px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .pro-agent-step {
@@ -791,7 +837,7 @@ body {
 
 .pipeline-node:hover {
   transform: scale(1.05);
-  filter: drop-shadow(0 0 12px rgba(99, 102, 241, 0.35));
+  filter: drop-shadow(0 0 12px rgba(210, 220, 235, 0.30));
 }
 
 
@@ -808,12 +854,12 @@ body {
   transition: all 0.45s cubic-bezier(0.25, 0.4, 0, 1);
   overflow: hidden;
 }
-.upload-zone:hover { border-color: rgba(99, 102, 241, 0.5); }
+.upload-zone:hover { border-color: rgba(255, 255, 255, 0.40); }
 .upload-zone.dragging {
-  border-color: var(--color-primary);
-  background: rgba(99, 102, 241, 0.04);
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.03);
   transform: scale(1.01);
-  box-shadow: 0 0 60px rgba(99, 102, 241, 0.1);
+  box-shadow: 0 0 60px rgba(190, 200, 218, 0.08);
 }
 
 /* Free-tier hero upload surface */
@@ -821,24 +867,24 @@ body {
   position: relative;
   cursor: pointer;
   border-radius: 24px;
-  border: 1.5px dashed rgba(45, 212, 191, 0.25);
+  border: 1.5px dashed rgba(255, 255, 255, 0.18);
   background:
-    radial-gradient(ellipse 80% 100% at 50% 0%, rgba(45, 212, 191, 0.05), transparent 70%),
+    radial-gradient(ellipse 80% 100% at 50% 0%, rgba(190, 205, 225, 0.045), transparent 70%),
     rgba(255, 255, 255, 0.018);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   transition: all 0.45s cubic-bezier(0.25, 0.4, 0, 1);
   overflow: hidden;
 }
-.free-upload-hero:hover { border-color: rgba(45, 212, 191, 0.55); }
+.free-upload-hero:hover { border-color: rgba(255, 255, 255, 0.42); }
 .free-upload-hero.dragging {
-  border-color: var(--color-accent);
+  border-color: rgba(255, 255, 255, 0.7);
   border-style: solid;
   background:
-    radial-gradient(ellipse 80% 100% at 50% 0%, rgba(45, 212, 191, 0.12), transparent 70%),
-    rgba(45, 212, 191, 0.04);
+    radial-gradient(ellipse 80% 100% at 50% 0%, rgba(190, 205, 225, 0.10), transparent 70%),
+    rgba(255, 255, 255, 0.03);
   transform: scale(1.012);
-  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.4), 0 0 70px rgba(45, 212, 191, 0.14);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 70px rgba(190, 200, 218, 0.10);
 }
 .free-upload-hero.has-file {
   cursor: default;
@@ -869,7 +915,7 @@ body {
   transition: border-color 0.4s ease, transform 0.4s ease;
 }
 .free-pro-card:hover {
-  border-color: rgba(129, 140, 248, 0.3);
+  border-color: rgba(255, 255, 255, 0.22);
   transform: translateY(-2px);
 }
 
@@ -880,7 +926,7 @@ body {
   border-radius: 24px;
   padding: 40px 32px;
   text-align: center;
-  background: linear-gradient(135deg, rgba(129, 140, 248, 0.06), rgba(56, 189, 248, 0.03));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
   border: 1px solid var(--color-pro-glass-border);
 }
 
