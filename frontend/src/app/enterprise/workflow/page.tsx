@@ -9,6 +9,7 @@ import { useAppStore } from "@/store/useAppStore";
 import { AGENT_ORDER, AGENT_META } from "@/lib/types";
 import type { AgentId } from "@/lib/types";
 import { fadeUp, stagger } from "@/lib/animations";
+import ReportMarkdown from "@/components/ReportMarkdown";
 
 export default function WorkflowBuilderPage() {
   const router = useRouter();
@@ -100,14 +101,16 @@ export default function WorkflowBuilderPage() {
   const fmtElapsed = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
 
   return (
-    <div className="p-8 max-w-[1200px] mx-auto relative z-10">
-      <motion.div variants={stagger} initial="hidden" animate="visible" className="mb-8">
-        <motion.div variants={fadeUp} className="flex items-center gap-2 mb-3">
-          <div className="badge badge-pro"><Crown size={10} /> Workflow Builder</div>
-          <div className="badge badge-pro-gold text-[9px]">PRO ONLY</div>
+    <div className="relative z-10 px-6 md:px-10 lg:px-12 py-12 max-w-[1280px] mx-auto">
+      <motion.div variants={stagger} initial="hidden" animate="visible" className="mb-10">
+        <motion.div variants={fadeUp} className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-white/10 bg-white/[0.03] backdrop-blur-md mb-6">
+          <Crown size={12} className="text-foreground/70" />
+          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Workflow Builder · Pro</span>
         </motion.div>
-        <motion.h1 variants={fadeUp} className="font-display text-3xl md:text-4xl font-bold text-text-primary tracking-tight">Custom Pipeline</motion.h1>
-        <motion.p variants={fadeUp} className="text-text-secondary mt-2 font-light">Select agents, configure, and execute your custom ML workflow.</motion.p>
+        <motion.h1 variants={fadeUp} className="font-display text-5xl md:text-6xl tracking-[-1.5px] text-foreground leading-[0.95]">
+          Custom <em className="not-italic text-muted-foreground">pipeline.</em>
+        </motion.h1>
+        <motion.p variants={fadeUp} className="mt-4 max-w-xl text-base text-muted-foreground leading-relaxed">Select agents, configure, and execute your bespoke ML workflow.</motion.p>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -143,7 +146,7 @@ export default function WorkflowBuilderPage() {
           )}
 
           {/* Summary */}
-          <div className="pro-glass-xs p-4">
+          <div className="glass-panel rounded-2xl p-4">
             <div className="text-[10px] font-semibold uppercase tracking-[2px] text-text-muted mb-2">Pipeline Summary</div>
             <div className="flex items-center justify-between">
               <span className="text-[12px] text-text-secondary">Active Agents</span>
@@ -168,13 +171,13 @@ export default function WorkflowBuilderPage() {
           </button>
 
           {status && (
-            <div className="pro-glass-xs p-3 border-success/20 bg-success/[0.04]">
+            <div className="glass-panel rounded-2xl p-3 border-success/20 bg-success/[0.04]">
               <div className="text-[11px] text-success font-semibold mb-1">Status: {status.status}</div>
               <div className="text-[10px] text-text-muted font-mono">Elapsed: {fmtElapsed(elapsed)}</div>
             </div>
           )}
 
-          {error && <div className="pro-glass-xs p-3 border-destructive/20 bg-destructive/[0.04] text-destructive text-[12px]">{error}</div>}
+          {error && <div className="glass-panel rounded-2xl p-3 border-destructive/20 bg-destructive/[0.04] text-destructive text-[12px]">{error}</div>}
         </div>
 
         {/* Right: Agent selection or Execution View */}
@@ -182,10 +185,10 @@ export default function WorkflowBuilderPage() {
           {!running && !status ? (
             <>
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-[11px] font-semibold uppercase tracking-[2px] text-pro/60">Agent Pipeline</h2>
+                <h2 className="font-display text-[22px] text-foreground">Agent pipeline</h2>
                 <div className="flex gap-2">
-                  <button onClick={selectAll} className="btn-pro text-[10px] py-1 px-2">All</button>
-                  <button onClick={selectNone} className="btn-pro text-[10px] py-1 px-2">None</button>
+                  <button onClick={selectAll} className="btn-ghost">All</button>
+                  <button onClick={selectNone} className="btn-ghost">None</button>
                 </div>
               </div>
 
@@ -226,7 +229,7 @@ export default function WorkflowBuilderPage() {
                       {/* Toggle switch */}
                       <div className={`relative w-10 h-[22px] rounded-full transition-all duration-300 shrink-0 ${
                         selected
-                          ? "bg-gradient-to-r from-pro to-pro-bright shadow-[0_0_8px_rgba(129,140,248,0.2)]"
+                          ? "bg-gradient-to-r from-pro to-pro-bright shadow-[0_0_10px_rgba(255,255,255,0.18)]"
                           : "bg-glass-active"
                       }`}>
                         <motion.div
@@ -248,8 +251,8 @@ export default function WorkflowBuilderPage() {
               <div className="pro-glass overflow-hidden p-6">
                 <div className="flex items-center justify-between mb-4 border-b border-pro-glass-border pb-3">
                   <div>
-                    <h3 className="text-[13px] font-semibold text-text-primary">Workflow Progress</h3>
-                    <p className="text-[11px] text-text-muted mt-0.5">Executing your custom ML pipeline</p>
+                    <h3 className="font-display text-[20px] text-foreground">Workflow progress</h3>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">Executing your custom ML pipeline</p>
                   </div>
                   <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${
                     status?.status === "completed" ? "bg-success/10 text-success" :
@@ -333,18 +336,16 @@ export default function WorkflowBuilderPage() {
               {/* Final Report */}
               {report && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass p-8">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-[2px] text-pro mb-6 flex items-center gap-2"><FileText size={14} /> Final Report</h3>
-                  <div className="prose prose-invert prose-sm max-w-none" dangerouslySetInnerHTML={{
-                    __html: report.replace(/^### (.+)$/gm, "<h3>$1</h3>").replace(/^## (.+)$/gm, "<h2>$1</h2>").replace(/^# (.+)$/gm, "<h1>$1</h1>").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`(.+?)`/g, "<code>$1</code>").replace(/^- (.+)$/gm, "<li>$1</li>").replace(/\n/g, "<br>"),
-                  }} />
+                  <h3 className="font-display text-[24px] text-foreground mb-6 flex items-center gap-2.5"><FileText size={18} className="text-muted-foreground" /> Final report</h3>
+                  <ReportMarkdown content={report} />
                 </motion.div>
               )}
 
               {/* Visualizations */}
               {vizs && vizs.length > 0 && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass p-8 mt-5">
-                  <h3 className="text-[11px] font-semibold uppercase tracking-[2px] text-pro mb-6 flex items-center gap-2">
-                    <BarChart3 size={14} className="text-pro" /> Workflow Visualizations
+                  <h3 className="font-display text-[24px] text-foreground mb-6 flex items-center gap-2.5">
+                    <BarChart3 size={18} className="text-muted-foreground" /> Workflow visualizations
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {vizs.map((viz) => (

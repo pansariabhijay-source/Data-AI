@@ -30,7 +30,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Ingest",
     description: "Load, profile, and validate the dataset",
     icon: "Database",
-    color: "#818cf8",
+    color: "#e6e9ef",
   },
   preprocessing: {
     id: "preprocessing",
@@ -38,7 +38,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Clean",
     description: "Handle missing values, outliers, and duplicates",
     icon: "Eraser",
-    color: "#a78bfa",
+    color: "#d3d8e1",
   },
   feature_engineering: {
     id: "feature_engineering",
@@ -46,7 +46,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Engineer",
     description: "Encode, transform, and select features",
     icon: "Wrench",
-    color: "#c084fc",
+    color: "#c2c8d4",
   },
   data_splitting: {
     id: "data_splitting",
@@ -54,7 +54,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Split",
     description: "Create train, validation, and test sets",
     icon: "Split",
-    color: "#e879f9",
+    color: "#b4bcca",
   },
   model_training: {
     id: "model_training",
@@ -62,7 +62,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Train",
     description: "Train and evaluate multiple ML models",
     icon: "Brain",
-    color: "#f472b6",
+    color: "#c8ced9",
   },
   error_detection: {
     id: "error_detection",
@@ -70,7 +70,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Audit",
     description: "Detect overfitting, leakage, and anomalies",
     icon: "ShieldAlert",
-    color: "#fb923c",
+    color: "#d8dce4",
   },
   improvement: {
     id: "improvement",
@@ -78,7 +78,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Improve",
     description: "Optimize hyperparameters and retry failed models",
     icon: "TrendingUp",
-    color: "#34d399",
+    color: "#bcc3d0",
   },
   finalization: {
     id: "finalization",
@@ -86,7 +86,7 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     shortLabel: "Finalize",
     description: "Generate reports, SHAP explanations, and export",
     icon: "PackageCheck",
-    color: "#38bdf8",
+    color: "#eef1f6",
   },
 };
 
