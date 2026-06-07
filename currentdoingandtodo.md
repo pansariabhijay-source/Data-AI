@@ -9,7 +9,12 @@ Newest changes at the top of each section.
 
 This is the full story of the work session, so anyone (or a fresh chat) can pick
 up with complete context. Everything below is **committed and pushed to GitHub
-`main`** (latest commit `739778d`).
+`main`** (latest commit `e7259dc`).
+
+> **NOTE (newest work):** after the backend session narrated below, a full
+> **frontend design-system overhaul** was done — see the **"🎨 Frontend"** section
+> just below this handoff. The backend narrative (commits up to `739778d`) is
+> unchanged and still accurate.
 
 ### How it started — the reported bug
 The user reported: *"whenever I upload a dataset it takes ages and then fails to
@@ -93,8 +98,83 @@ notebook · `65bce31` reports-page clarity · `739778d` gitignore reports-route 
   (regenerates), logs, caches, old benchmark JSONs. Kept the 170 MB dataset CSV
   per the user. The real space hogs are `venv` (~1.4 GB) and
   `frontend/node_modules` (~0.5 GB), both required to run.
-- Uncommitted-by-design: `.env`/`.claude` local state, the user's dataset CSV,
-  `frontend/dev-all.mjs` + `PROJECT_*.md` deletions (were dirty pre-session).
+- Uncommitted-by-design: `.env` + `.claude/settings.local.json` (local agent
+  state) and the 166 MB `fake_internship_detection_dataset.csv` (now **gitignored**
+  — it exceeds GitHub's 100 MB per-file limit and must never be committed). The
+  old `PROJECT_*.md`/`README.pdf` deletions + `dev-all.mjs` change were committed
+  in `3e5be1e`.
+
+---
+
+## 🎨 Frontend — full design-system overhaul + "Mission Control" (latest session)
+
+A complete **visual redesign** of the Next.js 16 frontend. **Not a stack change** —
+still Next.js 16 + Tailwind v4 + React 19, talking to the same FastAPI backend via
+the dev proxy. **All app functionality preserved** (auth, routing, upload, polling,
+pipeline, reports). All committed & pushed to `main` (latest `e7259dc`).
+
+### The shared design language (every page now follows this)
+- **Deep navy + Instrument Serif + frosted glass, fully monochrome.** Background is
+  deep navy (never pure black). Headings/display use **Instrument Serif** (loaded
+  via a Google Fonts `@import` at the top of `globals.css`); body is **Inter**.
+  Surfaces are frosted, rim-lit glass; buttons are rounded-full pills.
+- **No brand hues.** Indigo/violet/teal were all replaced with a **cool-grayscale
+  ramp**. The ONLY colors left are **semantic status** (success / warning / error)
+  and chart data encodings. If you see indigo creep back, it's a regression.
+- Lives in **`frontend/src/app/globals.css`**: the `@theme` tokens (primary / pro /
+  accent / agent-* are all grayscale now), `.liquid-glass`, `fade-rise` animations,
+  `.mission-atmos` (cosmic radial-glow gradient), `.starfield` (twinkle), and the
+  glass / button / badge primitives.
+
+### Page-by-page (file → what changed)
+- **`src/app/page.tsx` (landing `/`)** — cinematic **fullscreen looping-video hero**
+  (serif headline, liquid-glass nav + CTAs) → a **Free vs Enterprise** "Choose your
+  path" section (monochrome tier cards) → footer. "Begin Journey" routes into the
+  app (auth-aware). **IMPORTANT:** `/` is now a **PUBLIC** page — the Next 16
+  middleware **`src/proxy.ts`** was changed so `/` is no longer login-gated (it used
+  to redirect to `/auth`).
+- **`src/app/enterprise/page.tsx` (dashboard)** — rebuilt as **"Axiom Mission
+  Control"**: cosmic atmosphere + starfield backdrop, a "MISSION CONTROL · ONLINE"
+  pill, large serif greeting, premium glass **stat cards** (Active pipelines /
+  Reports generated / Agents online=8 / Last execution), glowing **quick-action
+  tiles** (Upload→file picker, Workflow Builder, Agent Console, Reports, Run
+  History), and a **recent-activity "mission log"**. Reuses `AnimatedCounter` and
+  `fadeUp/stagger` from `@/lib/animations`. All upload/polling logic kept.
+- **`src/components/layout/Sidebar.tsx`** — now a **floating** rounded glass panel
+  (inset from edges), white-glass active state. **`AppShell.tsx`** renders
+  `.mission-atmos` + `.starfield` for enterprise routes and sets the main margin for
+  the floating sidebar (collapsed 100px / expanded 264px).
+- **Console pages** (`enterprise/{reports,runs,visualizations,settings,agents}` +
+  `report/[runId]`) — serif page titles (because `--font-display` is now Instrument
+  Serif), serif **section headers** and serif **stat numbers**. Done at the
+  component level (`StatCard`, `SectionHeader`, settings `Section`) so it propagates.
+- **`src/app/auth` + `src/app/welcome`** — serif headings, navy, consistent.
+- **Free-tier** (`src/app/free`, `free/results/[runId]`) — same serif/monochrome.
+- **`src/app/enterprise/workflow/page.tsx`** — replaced **undefined** CSS classes
+  (`pro-glass-xs`, `btn-pro`, `badge-pro-gold` had NO css → rendered as flat boxes)
+  with real `glass-panel`/`btn-ghost`; serif hero + section headers; swapped a
+  hand-rolled markdown parser for the shared **`ReportMarkdown`**.
+- **`src/lib/types.ts`** — `AGENT_META` had **8 hardcoded rainbow hex colors**;
+  neutralized to the gray ramp, which fixes agent icons **everywhere** they render.
+
+### Frontend commits this session (all on `main`)
+`85fa647` cinematic navy + Instrument Serif redesign · `5aeb29d` retune console
+primitives · `8d7390e` full-monochrome palette + Mission Control dashboard ·
+`3e5be1e` chore: housekeeping (removed `PROJECT_*.md` + `README.pdf`, updated
+`dev-all.mjs`, added `scripts/run_full_pipeline.py`) · `b0eadcc` gitignore the
+166 MB CSV · `e7259dc` Workflow Builder polish.
+
+### How to VERIFY frontend changes (for a fresh agent — no Playwright installed)
+Pages are gated by auth (client `AppShell` + server `proxy.ts`). To screenshot a
+**gated** page headless: (1) create a throwaway user via `POST /api/auth/signup`
+(a test user **`ui_tester`, id 65** already exists in the dev DB); (2) navigate to
+any same-origin page, then seed `localStorage['axiom-auth-store']` +
+`['axiom-app-store']` + the `axiom-auth`/`axiom-workspace` cookies with that token;
+(3) drive **system Chrome over CDP** — Node 24 has a global `WebSocket`; launch
+`chrome.exe --headless=new --remote-debugging-port=PORT --remote-allow-origins=*`,
+attach to the page target, `Page.navigate`, then `Page.captureScreenshot` with
+`captureBeyondViewport:true` for a full-page shot. (This is how every screenshot in
+this session was produced; the helper scripts were temporary and deleted.)
 
 ---
 
@@ -282,6 +362,25 @@ notebook · `65bce31` reports-page clarity · `739778d` gitignore reports-route 
 ## 🔜 TODO (prioritized)
 
 ### Tier 1 — highest leverage
+0. **Prediction / inference feature — NOT BUILT (highest-value gap).** The pipeline
+   is currently **train → evaluate → report ONLY**. There is **no `/api/predict`**
+   and no UI to score new/unseen data — you cannot ask "predict the outcome for
+   these new rows." **Blocker:** preprocessing + feature-engineering transforms are
+   applied *imperatively* by the agents and are **NOT persisted as reusable fitted
+   transformers** (`inference_manifest.json` has `encodings: null`; only the final
+   champion model is dumped via joblib). The model expects an already-transformed
+   feature space it can't rebuild from raw input — so the only faithful "replay" is
+   the heavy reproduction notebook (Report → Reproduce), not lightweight scoring.
+   **Proposed scope (smallest-useful-first):** (1) persist the fitted preprocess+FE
+   as one saved transform (a `ColumnTransformer`/`Pipeline`) — the enabling work;
+   (2) `POST /api/predict/{run_id}` — upload new raw CSV (no target) → rows + class
+   + probability, downloadable; (3) a "Predict" tab on the report page; (4) optional
+   **top-K-per-group** ranking (pass a group column → top-K rows per group). Use
+   case that motivated this: an F1 dataset (`16_F1_Race_Results_2019_2024.csv`) —
+   predict each race's **top-3 podium** drivers. Target is derived
+   (`Top3_Podium = Position <= 3`); most columns are post-race **leakage** (Points
+   AUC≈0.999, Position=1.0) so only pre-race signal is valid (Starting Grid AUC≈0.92,
+   Driver/Team). **User decided to DEFER building this for now** (asked, said leave it).
 1. **Process isolation for the full pipeline** — DONE (see Done section). Future:
    extend the same child-process pattern to `/api/workflow/run` (enterprise
    custom workflows still run in-thread).
