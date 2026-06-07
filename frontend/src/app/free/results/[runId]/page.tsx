@@ -31,7 +31,7 @@ function StatCard({
     >
       <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-white/[0.02] to-transparent rounded-bl-[60px] pointer-events-none" />
       <Icon size={18} strokeWidth={1.5} className={`${color} mb-4 opacity-60 group-hover:opacity-100 transition-opacity duration-300`} />
-      <div className="text-2xl font-bold text-text-primary tracking-tight truncate">{value}</div>
+      <div className="font-display text-[32px] leading-none font-bold text-text-primary tracking-tight truncate">{value}</div>
       <div className="text-[10px] text-text-muted uppercase tracking-[1.8px] mt-1.5 font-semibold">{label}</div>
     </motion.div>
   );
@@ -47,7 +47,7 @@ function SectionHeader({ title, subtitle, icon: Icon, badge }: {
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-3">
-          <h2 className="text-[17px] font-bold text-text-primary tracking-tight">{title}</h2>
+          <h2 className="font-display text-[22px] text-text-primary tracking-tight">{title}</h2>
           {badge && <span className="text-[9px] font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-accent/10 text-accent">{badge}</span>}
         </div>
         {subtitle && <p className="text-[13px] text-text-muted mt-0.5 leading-relaxed">{subtitle}</p>}
@@ -161,7 +161,7 @@ export default function FreeResultsPage({ params }: { params: Promise<{ runId: s
                 <motion.div variants={fadeUp} className="flex items-center gap-2.5 mb-3">
                   <span className="badge badge-success"><Sparkles size={10} /> Complete</span>
                 </motion.div>
-                <motion.h1 variants={fadeUp} className="text-3xl md:text-[40px] font-bold tracking-[-0.03em] gradient-text-hero leading-tight">Your AI Results</motion.h1>
+                <motion.h1 variants={fadeUp} className="font-display text-3xl md:text-[44px] font-bold text-text-primary tracking-tight leading-tight">Your AI Results</motion.h1>
                 <motion.p variants={fadeUp} className="text-[14px] text-text-muted mt-2">Your autonomous data scientist finished the job. Here&apos;s everything it found.</motion.p>
               </div>
               <motion.div variants={fadeUp} className="flex items-center gap-3">
@@ -190,7 +190,7 @@ export default function FreeResultsPage({ params }: { params: Promise<{ runId: s
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[10px] font-bold uppercase tracking-[2.5px] text-accent mb-1">Champion Model</div>
-                  <div className="text-2xl md:text-3xl font-bold text-text-primary tracking-tight">{bestModel.name}</div>
+                  <div className="font-display text-[34px] md:text-[40px] font-bold text-text-primary tracking-tight leading-none">{bestModel.name}</div>
                   <div className="flex items-center gap-4 mt-2 flex-wrap">
                     <span className="text-[14px] font-mono font-semibold text-accent">{results.best_metric_name}: {results.best_metric_value?.toFixed(4)}</span>
                     <span className="text-[12px] text-text-muted">{results.problem_type?.replace("_", " ")} · Target: <strong className="text-text-secondary">{results.target_column}</strong></span>

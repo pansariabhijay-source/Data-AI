@@ -14,7 +14,7 @@ function Brand({ workspace }: { workspace?: string }) {
       <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-primary-container flex items-center justify-center shadow-[0_4px_18px_rgba(79,70,229,0.35)]">
         <span className="text-white font-bold text-sm">A</span>
       </div>
-      <span className="text-[15px] font-semibold tracking-tight text-text-primary font-display">Axiom</span>
+      <span className="text-[20px] tracking-tight text-text-primary font-display">Axiom</span>
       {workspace && (
         <>
           <span className="text-text-ghost">/</span>

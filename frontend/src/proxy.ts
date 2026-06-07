@@ -7,11 +7,11 @@ import type { NextRequest } from "next/server";
 
 const AUTH_COOKIE = "axiom-auth";
 
-// /auth is the front door: an unauthenticated visitor must sign in there before
-// they reach anything else — including the marketing landing page ("/"). So the
-// landing page is gated too, and the desired flow is:
-//   open app → /auth → (sign in) → "/" landing → /free or /enterprise.
-const PROTECTED_PREFIXES = ["/", "/welcome", "/free", "/enterprise", "/pipeline", "/report"];
+// The cinematic landing page ("/") is the PUBLIC front door — anyone can see it,
+// and its "Begin Journey" CTA is what sends visitors on to /auth. Everything past
+// the front door is gated. The desired flow is:
+//   "/" landing → Begin Journey → /auth → (sign in) → /welcome → /free or /enterprise.
+const PROTECTED_PREFIXES = ["/welcome", "/free", "/enterprise", "/pipeline", "/report"];
 
 // The only page a logged-in user has no business sitting on — they're already in.
 const PUBLIC_ONLY = ["/auth"];
@@ -20,17 +20,16 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAuthed = Boolean(request.cookies.get(AUTH_COOKIE)?.value);
 
-  // Match a protected prefix. The "/" entry deliberately matches ONLY the exact
-  // root (every other path is caught by its own, more specific prefix).
+  // Match a protected prefix (exact page or any nested path under it).
   const isProtected = PROTECTED_PREFIXES.some(
-    (p) => pathname === p || (p !== "/" && pathname.startsWith(`${p}/`))
+    (p) => pathname === p || pathname.startsWith(`${p}/`)
   );
 
   // Logged out + heading into the app → bounce to /auth, remembering the
   // intended destination so we can return them there after they sign in.
   if (isProtected && !isAuthed) {
     const url = new URL("/auth", request.url);
-    if (pathname !== "/") url.searchParams.set("next", pathname);
+    url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
 

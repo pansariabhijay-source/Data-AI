@@ -77,7 +77,7 @@ export default function WelcomePage() {
           <span className="live-dot live-dot-primary" />
           Workspace ready
         </div>
-        <h1 className="text-[clamp(2rem,4.5vw,3.2rem)] font-bold tracking-[-0.035em] text-text-primary">
+        <h1 className="font-display text-[clamp(2.6rem,5.5vw,4rem)] tracking-[-0.01em] leading-[1.02] text-text-primary">
           Welcome{user?.username ? <>, <span className="gradient-text">{user.username}</span></> : ""}.
         </h1>
         <p className="text-text-secondary text-[15px] mt-3 max-w-[440px] mx-auto leading-relaxed">
@@ -123,7 +123,7 @@ export default function WelcomePage() {
                 </span>
               </div>
 
-              <h2 className="text-[22px] font-bold text-text-primary tracking-[-0.02em]">{m.name}</h2>
+              <h2 className="font-display text-[30px] text-text-primary tracking-[-0.01em] leading-tight">{m.name}</h2>
               <p className="text-[13px] font-medium mt-0.5" style={{ color: m.accent }}>{m.tagline}</p>
 
               {/* audience */}

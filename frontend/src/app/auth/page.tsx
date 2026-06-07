@@ -119,7 +119,7 @@ export default function AuthPage() {
           transition={{ duration: 0.6, delay: 0.2, ease: [0.25, 0.4, 0, 1] }}
           className="relative z-10"
         >
-          <h2 className="text-[26px] font-bold tracking-[-0.03em] text-text-primary leading-tight">
+          <h2 className="font-display text-[36px] tracking-[-0.01em] text-text-primary leading-[1.05]">
             Your autonomous
             <br />
             <span className="gradient-text">data scientist.</span>
@@ -153,7 +153,7 @@ export default function AuthPage() {
             <span className="text-[17px] font-semibold tracking-tight text-text-primary font-display">Axiom</span>
           </div>
 
-          <h1 className="text-[26px] font-bold tracking-[-0.03em] text-text-primary">
+          <h1 className="font-display text-[34px] tracking-[-0.01em] leading-tight text-text-primary">
             {isLogin ? "Welcome back" : "Create your workspace"}
           </h1>
           <p className="text-text-secondary text-[14px] mt-1.5">

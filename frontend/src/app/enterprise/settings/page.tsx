@@ -16,7 +16,7 @@ function Section({ title, desc, children }: { title: string; desc?: string; chil
   return (
     <section className="glass-panel rounded-2xl p-6 md:p-7">
       <div className="mb-5">
-        <h2 className="text-[16px] font-semibold text-text-primary tracking-tight">{title}</h2>
+        <h2 className="font-display text-[21px] text-text-primary tracking-tight">{title}</h2>
         {desc && <p className="text-[13px] text-text-muted mt-0.5">{desc}</p>}
       </div>
       {children}

@@ -74,7 +74,7 @@ export default function PipelinePage({ params }: { params: Promise<{ runId: stri
                 <span className="text-[11px] text-text-muted font-mono tabular-nums">{formatTime(elapsed)}</span>
               </div>
             </motion.div>
-            <motion.h1 variants={fadeUp} className="text-3xl md:text-4xl font-bold tracking-[-0.03em] gradient-text-hero">
+            <motion.h1 variants={fadeUp} className="font-display text-3xl md:text-4xl font-bold text-text-primary tracking-tight">
               Pipeline Orchestration
             </motion.h1>
             <motion.p variants={fadeUp} className="text-text-secondary mt-2 font-light">

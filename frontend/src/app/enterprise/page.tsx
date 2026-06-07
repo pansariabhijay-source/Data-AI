@@ -207,7 +207,7 @@ export default function WorkspaceHome() {
         className="glass-panel rounded-2xl overflow-hidden"
       >
         <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
-          <h2 className="text-[15px] font-semibold text-text-primary flex items-center gap-2">
+          <h2 className="font-display text-[20px] text-text-primary flex items-center gap-2">
             <History size={16} className="text-text-muted" /> Recent runs
           </h2>
           <Link href="/enterprise/runs" className="text-[12px] font-medium text-primary hover:underline">View all</Link>

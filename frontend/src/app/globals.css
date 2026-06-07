@@ -1,17 +1,32 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-display: "Outfit", "Inter", system-ui, sans-serif;
+  /* Instrument Serif is the signature display face across every surface —
+     page titles, brand wordmarks and big editorial headers all read serif. */
+  --font-display: "Instrument Serif", "Outfit", Georgia, serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", monospace;
 
-  /* ── CORE PALETTE — slate near-black foundation (Linear) ── */
-  --color-void: #0a0b0f;
-  --color-surface: #14161c;
-  --color-elevated: #181b22;
-  --color-panel: #1c1f27;
-  --color-panel-high: #252934;
-  --color-surface-bright: #2e333f;
+  /* ── CINEMATIC HERO TYPE — Instrument Serif display + Inter body ── */
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
+
+  /* ── HERO SEMANTIC TOKENS — additive; do NOT collide with the indigo
+        console palette below (foreground/muted-foreground/background are new) ── */
+  --color-foreground: #ffffff;
+  --color-muted-foreground: #a6a7ad;
+  --color-background: #002b42;
+
+  /* ── CORE PALETTE — deep-navy foundation (cinematic) ──
+     Solid surfaces are navy-tinted and step LIGHTER than the body (#002b42)
+     so cards read as elevated, not recessed. ── */
+  --color-void: #03161f;
+  --color-surface: #083347;
+  --color-elevated: #0d3a52;
+  --color-panel: #114257;
+  --color-panel-high: #185069;
+  --color-surface-bright: #20617d;
 
   /* ── GLASS SYSTEM — restrained, premium ── */
   --color-glass: rgba(255, 255, 255, 0.035);
@@ -114,7 +129,7 @@ html {
 
 body {
   background: var(--color-void);
-  background-image: radial-gradient(circle at 50% -10%, #0d1018 0%, #07080c 55%);
+  background-image: radial-gradient(circle at 50% -10%, #002b42 0%, #03141d 55%);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   overflow-x: hidden;
@@ -926,6 +941,52 @@ body {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
 .font-display { font-family: var(--font-display); }
+.font-serif { font-family: var(--font-serif); }
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   LIQUID GLASS — frosted, rim-lit pill used by the cinematic hero
+   ═══════════════════════════════════════════════════════════════════ */
+
+.liquid-glass {
+  background: rgba(255, 255, 255, 0.01);
+  background-blend-mode: luminosity;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: none;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s var(--ease-out);
+}
+.liquid-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.4px;
+  background: linear-gradient(180deg,
+    rgba(255,255,255,0.45) 0%, rgba(255,255,255,0.15) 20%,
+    rgba(255,255,255,0) 40%, rgba(255,255,255,0) 60%,
+    rgba(255,255,255,0.15) 80%, rgba(255,255,255,0.45) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   FADE-RISE — staggered cinematic entrance for the hero
+   ═══════════════════════════════════════════════════════════════════ */
+
+@keyframes fade-rise {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-rise { animation: fade-rise 0.8s ease-out both; }
+.animate-fade-rise-delay { animation: fade-rise 0.8s ease-out 0.2s both; }
+.animate-fade-rise-delay-2 { animation: fade-rise 0.8s ease-out 0.4s both; }
 
 /* Respect reduced-motion preferences */
 @media (prefers-reduced-motion: reduce) {

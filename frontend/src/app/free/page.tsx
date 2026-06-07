@@ -185,7 +185,7 @@ export default function FreeModePage() {
 
             <motion.h1
               variants={fadeUp}
-              className="text-[42px] md:text-[52px] font-bold tracking-[-0.045em] leading-[1.08] mb-4 text-text-primary"
+              className="font-display text-[46px] md:text-[60px] font-bold tracking-tight leading-[1.0] mb-4 text-text-primary"
             >
               Drop your data.{" "}
               <span className="gradient-text">Watch AI work.</span>
@@ -546,7 +546,7 @@ export default function FreeModePage() {
             </div>
 
             <div className="text-center mb-8">
-              <h2 className="text-[26px] font-bold tracking-[-0.035em] gradient-text-pro mb-2">
+              <h2 className="font-display text-[34px] tracking-tight gradient-text-pro mb-2">
                 Free runs the pipeline.
                 <br />
                 <span className="text-text-secondary font-light">Pro lets you command it.</span>
@@ -608,7 +608,7 @@ export default function FreeModePage() {
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-pro to-pro-muted border border-pro/30 shadow-lg shadow-pro-glow flex items-center justify-center mx-auto mb-5">
                   <Crown size={24} className="text-white" />
                 </div>
-                <h3 className="text-[20px] font-bold text-text-primary tracking-[-0.025em] mb-1.5">
+                <h3 className="font-display text-[25px] text-text-primary tracking-tight mb-1.5">
                   Ready to go deeper?
                 </h3>
                 <p className="text-text-muted text-[13px] mb-6 max-w-[300px] mx-auto leading-relaxed">

@@ -42,7 +42,7 @@ function StatCard({
         strokeWidth={1.5}
         className={`${color} mb-4 opacity-60 group-hover:opacity-100 transition-opacity duration-300`}
       />
-      <div className="text-2xl font-bold text-text-primary tracking-tight truncate">
+      <div className="font-display text-[32px] leading-none font-bold text-text-primary tracking-tight truncate">
         {value}
       </div>
       <div className="text-[10px] text-text-muted uppercase tracking-[1.8px] mt-1.5 font-semibold">
@@ -65,7 +65,7 @@ function SectionHeader({ title, subtitle, icon: Icon, badge }: {
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-3">
-          <h2 className="text-[17px] font-bold text-text-primary tracking-tight">
+          <h2 className="font-display text-[22px] text-text-primary tracking-tight">
             {title}
           </h2>
           {badge && (
@@ -319,7 +319,7 @@ export default function ReportPage({
                 </motion.div>
                 <motion.h1
                   variants={fadeUp}
-                  className="text-3xl md:text-[40px] font-bold tracking-[-0.03em] gradient-text-hero leading-tight"
+                  className="font-display text-3xl md:text-[44px] font-bold text-text-primary tracking-tight leading-tight"
                 >
                   Execution Report
                 </motion.h1>

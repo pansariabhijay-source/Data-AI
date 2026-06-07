@@ -106,7 +106,7 @@ export default function WorkflowBuilderPage() {
           <div className="badge badge-pro"><Crown size={10} /> Workflow Builder</div>
           <div className="badge badge-pro-gold text-[9px]">PRO ONLY</div>
         </motion.div>
-        <motion.h1 variants={fadeUp} className="text-3xl font-bold tracking-[-0.03em] gradient-text-pro-hero">Custom Pipeline</motion.h1>
+        <motion.h1 variants={fadeUp} className="font-display text-3xl md:text-4xl font-bold text-text-primary tracking-tight">Custom Pipeline</motion.h1>
         <motion.p variants={fadeUp} className="text-text-secondary mt-2 font-light">Select agents, configure, and execute your custom ML workflow.</motion.p>
       </motion.div>
 

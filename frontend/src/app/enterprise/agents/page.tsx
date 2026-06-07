@@ -227,7 +227,7 @@ export default function AgentConsolePage() {
         </motion.div>
         <motion.h1
           variants={fadeUp}
-          className="text-3xl font-bold tracking-[-0.03em] gradient-text-hero"
+          className="font-display text-3xl md:text-4xl font-bold text-text-primary tracking-tight"
         >
           Independent Agents
         </motion.h1>
