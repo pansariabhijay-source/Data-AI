@@ -53,3 +53,6 @@ Thumbs.db
 
 # Benchmark outputs
 bench_*.json
+
+# ── Large data files (exceed GitHub's 100 MB limit; keep out of git) ──────────
+fake_internship_detection_dataset.csv
