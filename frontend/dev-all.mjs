@@ -6,7 +6,7 @@
 //
 // Zero dependencies. Ctrl+C stops both; if either exits, the other is torn down.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,8 +25,48 @@ const pythonCmd = existsSync(venvPython) ? venvPython : isWin ? "python" : "pyth
 const nextBin = join(FRONTEND_DIR, "node_modules", "next", "dist", "bin", "next");
 
 const RESET = "\x1b[0m";
+const BACKEND_PORT = 8000;
 const children = [];
 let shuttingDown = false;
+
+// Free the backend port before launching. A previous `python api.py` that didn't
+// shut down cleanly (common on Windows where Ctrl+C may not reap the child) keeps
+// port 8000 bound. The new backend then fails with EADDRINUSE and exits, which
+// tears the whole stack down — looking like "nothing runs". Reap the squatter so
+// each `npm run dev` starts from a clean slate.
+function freeBackendPort(port) {
+  const pids = findPortPids(port);
+  if (pids.length === 0) return;
+  console.log(
+    `\x1b[33m[dev]\x1b[0m Port ${port} is already in use by PID(s) ${pids.join(", ")} — ` +
+      `reaping stale backend before starting.`,
+  );
+  for (const pid of pids) killPid(pid);
+}
+
+// Returns the listening PIDs on `port` (deduped). Best-effort and cross-platform.
+function findPortPids(port) {
+  const pids = new Set();
+  if (isWin) {
+    const res = spawnSync("netstat", ["-ano", "-p", "TCP"], { encoding: "utf8" });
+    if (res.status !== 0 || !res.stdout) return [];
+    for (const line of res.stdout.split("\n")) {
+      // e.g. "  TCP    127.0.0.1:8000   0.0.0.0:0   LISTENING   17916"
+      const m = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/);
+      if (m && Number(m[1]) === port) pids.add(m[2]);
+    }
+  } else {
+    const res = spawnSync("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], { encoding: "utf8" });
+    if (res.status !== 0 || !res.stdout) return [];
+    for (const pid of res.stdout.split("\n")) if (pid.trim()) pids.add(pid.trim());
+  }
+  return [...pids];
+}
+
+function killPid(pid) {
+  if (isWin) spawnSync("taskkill", ["/PID", pid, "/F"], { stdio: "ignore" });
+  else spawnSync("kill", ["-9", pid], { stdio: "ignore" });
+}
 
 function pipeLines(label, color, stream, out) {
   let buffer = "";
@@ -83,6 +123,8 @@ if (!existsSync(venvPython)) {
 
 console.log("Starting Axiom — FastAPI backend + Next.js frontend. Press Ctrl+C to stop both.\n");
 
+// Clear any orphaned backend squatting on the port, then launch.
+freeBackendPort(BACKEND_PORT);
 // Backend runs from the project root so api.py's relative paths (data/, artifacts/…) resolve.
 start("api", "\x1b[36m", pythonCmd, ["api.py"], ROOT);
 // Frontend dev server.
