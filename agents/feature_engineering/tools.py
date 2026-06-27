@@ -602,6 +602,17 @@ class FeatureEngineeringService:
         # Scale features (after selection)
         df, scaling_map = self.scale_features(df, target)
 
+        # Cast boolean feature columns to int so they survive the model-matrix build.
+        # Downstream (training/improvement/finalization) assembles X via
+        # `select_dtypes(include=[np.number])`, which EXCLUDES bool — so a bool feature
+        # would be silently dropped from the model while remaining in
+        # `selected_features`, desyncing the inference manifest from the actual model
+        # (and discarding genuine signal). Casting to int keeps them numeric everywhere.
+        bool_cols = [c for c in df.select_dtypes(include=["bool"]).columns if c != target]
+        if bool_cols:
+            df[bool_cols] = df[bool_cols].astype("int8")
+            logger.info(f"Cast {len(bool_cols)} boolean feature(s) to int: {bool_cols}")
+
         # selected_features is computed from df BEFORE attaching the hidden split-time
         # key, so the key is never treated as a model feature.
         selected = [c for c in df.columns if c != target]
