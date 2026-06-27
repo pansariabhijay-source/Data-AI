@@ -17,6 +17,23 @@ from core.logging_config import get_logger
 logger = get_logger("utils")
 
 
+def read_csv_safe(path: Any, **kwargs: Any) -> pd.DataFrame:
+    """``pd.read_csv`` that tolerates non-UTF-8 files.
+
+    Real-world CSVs (e.g. exports from Excel) are often Latin-1 / Windows-1252 and
+    crash a plain UTF-8 read with a ``UnicodeDecodeError``. Try UTF-8 first, then
+    fall back to the common 8-bit encodings so the upload still loads instead of
+    failing on a stray byte.
+    """
+    for enc in ("utf-8", "latin-1", "cp1252"):
+        try:
+            return pd.read_csv(path, encoding=enc, **kwargs)
+        except UnicodeDecodeError:
+            continue
+    # Last resort: replace undecodable bytes rather than fail the whole run.
+    return pd.read_csv(path, encoding="utf-8", encoding_errors="replace", **kwargs)
+
+
 def optimize_dataframe_memory(df: pd.DataFrame) -> pd.DataFrame:
     """Downcast numeric dtypes to reduce memory usage. Operates in-place and returns df."""
     start_mem = df.memory_usage(deep=True).sum() / (1024 * 1024)

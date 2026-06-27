@@ -41,11 +41,14 @@ def test_get_nonexistent_model():
 
 
 def test_classifiers_handle_imbalance():
-    """Every classifier must apply class weighting or scale_pos_weight."""
+    """Every classifier must apply class weighting, scale_pos_weight, or is_unbalance."""
     registry = build_default_registry()
     for spec in registry.list_models(ProblemType.CLASSIFICATION):
         weighted = spec.default_params.get("class_weight") == "balanced"
-        assert weighted or spec.imbalance_param, f"{spec.name} has no imbalance handling"
+        lgbm_unbalance = spec.default_params.get("is_unbalance", False)
+        assert weighted or spec.imbalance_param or lgbm_unbalance, (
+            f"{spec.name} has no imbalance handling"
+        )
 
 
 def test_apply_imbalance_handling_sets_scale_pos_weight():

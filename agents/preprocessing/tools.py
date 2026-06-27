@@ -20,7 +20,7 @@ from core.constants import ProblemType
 from core.exceptions import PreprocessingError
 from core.logging_config import get_logger, log_stage_timing
 from core.state import ErrorReport, PipelineState, PreprocessingSummary
-from core.utils import ensure_directory, get_memory_usage_mb, optimize_dataframe_memory
+from core.utils import ensure_directory, get_memory_usage_mb, optimize_dataframe_memory, read_csv_safe
 from core.validation import compute_quality_score
 
 logger = get_logger("preprocessing")
@@ -120,9 +120,12 @@ class PreprocessingService:
                     fixes[col] = "converted to numeric"
                     continue
 
-                # Try datetime. (Pandas >=2 removed ``infer_datetime_format`` — it
-                # now infers per-element by default, so passing it raises TypeError
-                # and silently leaves date columns as strings.)
+                # Try datetime BEFORE unit-extraction. (Pandas >=2 removed
+                # ``infer_datetime_format`` — it now infers per-element by default, so
+                # passing it raises TypeError and silently leaves date columns as
+                # strings.) This ordering matters: a date like "2023-01-01 00:00:00"
+                # would otherwise be clobbered by the unit-extractor below, which would
+                # pull the leading number ("2023") and destroy the timestamp.
                 try:
                     import warnings as _warnings
                     with _warnings.catch_warnings():
@@ -134,6 +137,22 @@ class PreprocessingService:
                         continue
                 except Exception:
                     pass
+
+                # Try unit-laden numerics, e.g. "963 hp", "3990 cc", "2.5 sec",
+                # "$1,100,000", "800 Nm", "340 km/h". Plain to_numeric fails on these
+                # because of the currency/thousands separators and trailing units, so
+                # the column would be wrongly treated as a high-cardinality category
+                # and its real signal lost. Strip $ and commas, then pull the first
+                # numeric token; convert only if most rows yield a number AND the
+                # result isn't constant (avoids turning a code/label into a number).
+                stripped = df[col].astype(str).str.replace(r"[,$]", "", regex=True)
+                extracted = pd.to_numeric(
+                    stripped.str.extract(r"(-?\d+\.?\d*)", expand=False), errors="coerce"
+                )
+                if extracted.notna().mean() > 0.8 and extracted.nunique() > 1:
+                    df[col] = extracted
+                    fixes[col] = "extracted numeric from units"
+                    continue
 
                 # Try boolean
                 unique_lower = set(df[col].dropna().astype(str).str.lower().unique())
@@ -217,7 +236,7 @@ class PreprocessingService:
         if not data_path:
             raise PreprocessingError("No data path available")
 
-        df = pd.read_csv(data_path, low_memory=False)
+        df = read_csv_safe(data_path, low_memory=False)
         rows_before = len(df)
         cols_before = len(df.columns)
 

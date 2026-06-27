@@ -274,8 +274,13 @@ def run_workflow(
             on_agent_complete(agent_name, output)
 
         if output.status == "failed":
-            # For critical early stages, stop the workflow
-            if agent_name in ("data_collection", "preprocessing"):
+            # Stop on any agent that later stages depend on — without a trained model,
+            # error_detection/improvement/finalization produce empty/misleading output.
+            _CRITICAL = (
+                "data_collection", "preprocessing", "feature_engineering",
+                "data_splitting", "model_training",
+            )
+            if agent_name in _CRITICAL:
                 logger.error(f"Critical agent {agent_name} failed, stopping workflow")
                 state.failed = True
                 state.failure_reason = output.error or f"Critical agent {agent_name} failed"

@@ -20,7 +20,7 @@ from core.constants import ProblemType
 from core.exceptions import DataCollectionError
 from core.logging_config import get_logger, log_stage_timing
 from core.state import DatasetMetadata, ErrorReport, PipelineState
-from core.utils import get_memory_usage_mb, infer_column_types, optimize_dataframe_memory
+from core.utils import get_memory_usage_mb, infer_column_types, optimize_dataframe_memory, read_csv_safe
 from core.validation import (
     compute_quality_score,
     detect_class_imbalance,
@@ -52,11 +52,11 @@ class DataCollectionService:
         if file_size_mb > 100:
             logger.info(f"Large file ({file_size_mb:.0f}MB), using chunked loading")
             chunks = []
-            for chunk in pd.read_csv(path, sep=sep, chunksize=effective_chunk, low_memory=False):
+            for chunk in read_csv_safe(path, sep=sep, chunksize=effective_chunk, low_memory=False):
                 chunks.append(chunk)
             df = pd.concat(chunks, ignore_index=True)
         else:
-            df = pd.read_csv(path, sep=sep, low_memory=False)
+            df = read_csv_safe(path, sep=sep, low_memory=False)
 
         logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns from {path.name}")
         return df
@@ -124,6 +124,15 @@ class DataCollectionService:
             # A column dirtied by stray text (junk rows, "N/A") is still numeric
             # if the overwhelming majority of values parse as numbers.
             coerced = pd.to_numeric(col, errors="coerce")
+            if coerced.notna().mean() < DEFAULT_NUMERIC_COERCE_FRACTION:
+                # Numbers carrying units ("2.5 sec", "963 hp", "$1,100,000") don't
+                # parse directly. Strip $/commas and pull the first numeric token —
+                # preprocessing will do the same conversion, so the target type must
+                # agree or every model is handed a continuous target as "classes".
+                stripped = col.astype(str).str.replace(r"[,$]", "", regex=True)
+                coerced = pd.to_numeric(
+                    stripped.str.extract(r"(-?\d+\.?\d*)", expand=False), errors="coerce"
+                )
             if coerced.notna().mean() >= DEFAULT_NUMERIC_COERCE_FRACTION:
                 numeric = coerced.dropna()
             else:
@@ -197,6 +206,55 @@ class DataCollectionService:
                 if imbalance:
                     state.data_quality_flags["class_imbalance"] = imbalance
                     logger.warning(f"Class imbalance detected: {imbalance}")
+
+            # Zero-signal warning: if ALL numeric features have near-zero correlation
+            # with the target the dataset is likely synthetic noise. Flag it loudly so
+            # the user understands why models will perform at chance level.
+            try:
+                numeric_features = df.select_dtypes(include=[np.number]).columns.tolist()
+                numeric_features = [c for c in numeric_features if c != state.target_column]
+                if numeric_features and len(df) > 100:
+                    target_vals = pd.to_numeric(df[state.target_column], errors="coerce")
+                    corrs = df[numeric_features].apply(
+                        lambda col: abs(pd.to_numeric(col, errors="coerce").corr(target_vals))
+                    ).dropna()
+                    max_corr = float(corrs.max()) if len(corrs) else 0.0
+                    avg_corr = float(corrs.mean()) if len(corrs) else 0.0
+                    state.data_quality_flags["feature_signal"] = {
+                        "max_abs_corr": round(max_corr, 4),
+                        "avg_abs_corr": round(avg_corr, 4),
+                    }
+                    if max_corr < 0.05:
+                        state.data_quality_flags["low_signal_warning"] = (
+                            f"All numeric features have very low correlation with the target "
+                            f"(max |corr|={max_corr:.4f}, avg={avg_corr:.4f}). "
+                            f"The dataset may be synthetic noise or the true signal may be "
+                            f"entirely in categorical features. Model performance will likely "
+                            f"be near-random on numeric features alone."
+                        )
+                        logger.warning(
+                            f"LOW SIGNAL: max feature-target |correlation|={max_corr:.4f}. "
+                            f"Models will likely perform at chance level."
+                        )
+                        state.add_error(ErrorReport(
+                            severity="high",
+                            stage="data_collection",
+                            error_type="low_predictive_signal",
+                            root_cause=(
+                                f"All numeric features have near-zero correlation with the target "
+                                f"(max |corr|={max_corr:.4f}). This strongly suggests the dataset "
+                                f"is synthetic noise or the fraud labels were generated randomly "
+                                f"relative to the features."
+                            ),
+                            recommended_fix=(
+                                "Verify the dataset is correctly labelled. "
+                                "Consider using a different dataset with real fraud signal, "
+                                "or add features known to correlate with the outcome."
+                            ),
+                            retryable=False,
+                        ))
+            except Exception as _sig_err:
+                logger.debug(f"Signal check failed (non-critical): {_sig_err}")
 
         # Save cleaned path (same as raw for now — preprocessing will create new)
         state.cleaned_data_path = state.raw_data_path

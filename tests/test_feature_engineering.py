@@ -31,13 +31,13 @@ def test_encode_low_cardinality(service):
 
 def test_encode_high_cardinality(service):
     # High cardinality but NOT id-like (10 categories spread over 100 rows) →
-    # label-encoded into a numeric feature.
+    # frequency-encoded into a numeric feature (each category → its relative freq).
     service._config.max_onehot_cardinality = 3
     df = pd.DataFrame({"cat": [f"v{i % 10}" for i in range(100)], "val": range(100)})
     result, mapping = service.encode_categoricals(df)
     assert "cat" in result.columns
     assert pd.api.types.is_numeric_dtype(result["cat"])
-    assert "label_encoded" in mapping["cat"]
+    assert "frequency_encoded" in mapping["cat"]
 
 
 def test_encode_drops_id_like(service):
@@ -76,6 +76,9 @@ def test_remove_correlated(service):
 
 
 def test_scale_features(service):
+    # Scaling the shared matrix is opt-in now (default "none" — scaling is done
+    # per-model at training time instead). Enable it to test the code path.
+    service._config.scaling_method = "standard"
     df = pd.DataFrame({"a": [100, 200, 300], "b": [1, 2, 3]})
     result, mapping = service.scale_features(df)
     assert abs(result["a"].mean()) < 1e-10

@@ -232,6 +232,48 @@ this session was produced; the helper scripts were temporary and deleted.)
   for a batch tool whose reproducibility is already covered by the repro notebook.
 
 ### Pipeline / ML
+- **Out-of-time (chronological) splitting for temporal data — fraud-grade evaluation.**
+  Random splitting leaks the future on transactional data: a model "sees" tomorrow's
+  fraud pattern (and the same card/user) at train time, inflating offline metrics vs
+  production. Measured on creditcard.csv (`scripts/fraud_methodology_experiment.py`):
+  random-split test PR-AUC **0.829** vs honest out-of-time **0.775** — a ~5-point
+  optimism the random split was hiding. Now the splitter sorts by a detected time axis
+  (primary timestamp threaded from FE via a hidden `__axiom_split_time__` key, or a
+  numeric time column like creditcard's `Time`) and takes oldest→train, newest→test.
+  The sort key is dropped before saving so it never becomes a feature (verified no
+  leak). Falls back to stratified-random when there's no time axis or a chronological
+  slice would lose the rare class. `splitting.time_aware_split` = auto/on/off (auto).
+  Report explains the protocol. Also **fixed a bug introduced by the unit-extractor**:
+  it was clobbering datetime strings ("2023-01-01…" → 2023) by grabbing the leading
+  number before the datetime parser ran — reordered so datetime detection comes first.
+  Measured & rejected two other ideas: PR-AUC-only selection (no champion change) and
+  refit-champion-on-full-data (inconsistent: helped RF +0.01, hurt LGBM −0.18 PR-AUC).
+- **Preprocessing + feature-engineering were HURTING model quality — fixed.**
+  Reported symptom: running the pipeline *without* preprocessing + FE beat running
+  *with* them. Reproduced with an ablation harness (`scripts/fe_ablation_experiment.py`,
+  `scripts/fe_bugpath_experiment.py`): minimal prep beat the full pipeline on every
+  dataset. Root causes + fixes:
+  - **Global feature scaling** (`StandardScaler` baked into the shared CSV) — fit on
+    the *full* data before the split (leaks test stats) and hurts the tree/boosting
+    models that win. Now `scaling_method="none"`; scale-sensitive models
+    (LogReg/SVC/Linear/Ridge) are wrapped per-fit via
+    `core.model_registry.maybe_wrap_scaler` (leakage-free, trees keep raw features).
+  - **IQR outlier winsorization** — clipped predictive tail values; off by default
+    (`outlier_method="none"`). Trees are rank-based and robust.
+  - **`remove_low_variance`** clipped+min-max-scaled then applied a variance floor,
+    wrongly deleting skewed-but-predictive features and rare one-hot flags. Replaced
+    with a conservative, skew-proof (near-)constant test that never drops rare signal.
+  - **`remove_correlated`** dropped by column order; now keeps the pair member more
+    correlated with the target.
+  - **`drop_numeric_id_columns`** dropped legit columns whose *name* matched an ID
+    pattern (e.g. integer `*_code`) regardless of cardinality; now a name match also
+    requires high cardinality, and the pure-uniqueness threshold is 0.99.
+  - **`select_k_best`** cap raised 30→100 (was discarding useful mid-ranked features).
+  - **`generate_interactions`** flooded the matrix with noise products; off by default
+    (`enable_interactions`), since boosters capture interactions natively.
+  Verified end-to-end: full pipeline runs all 8 agents, linear models confirmed
+  scaler-wrapped, ensemble/SHAP/tuning/calibration all intact; pipeline now ≥ minimal
+  prep (and beats it where the bugs bit). All 88 unit tests green.
 - **Richer datetime decomposition** (`agents/feature_engineering/tools.py`,
   `extract_datetime_features`). Beyond raw year/month/dow/hour, now adds
   **cyclical** sin/cos for month/dow/hour (so Dec≈Jan, 23h≈0h — matters for
@@ -436,6 +478,12 @@ this session was produced; the helper scripts were temporary and deleted.)
 | `ARTIFACT_MIN_KEEP` | 5 | Always-kept newest runs |
 | `ARTIFACT_RETENTION_DAYS` | 30 | Age cap for runs/uploads |
 | `USE_SMOTE` | off | Train-only minority resampling |
+| `feature_engineering.scaling_method` | `none` | Global scaling of shared matrix (off — scaling is per-model now) |
+| `preprocessing.outlier_method` | `none` | IQR winsorization (off — trees robust; clipping erases tail signal) |
+| `feature_engineering.select_k_best` | 100 | Max features kept by mutual information (was 30/50) |
+| `feature_engineering.enable_interactions` | off | Explicit pairwise products (off — boosters model interactions natively) |
+| `splitting.time_aware_split` | `auto` | Out-of-time chronological split when a time axis exists (auto/on/off) |
+| `error_detection.overfitting_min_val_score` | 0.80 | Only flag overfitting when validation is also weak (suppresses benign tree memorization) |
 
 ## 🧪 How to verify changes
 - `python scripts/diagnose_pipeline.py` — times upload + dumps what every agent

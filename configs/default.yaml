@@ -24,7 +24,10 @@ data_collection:
   sample_rows_for_profiling: 10000
 
 preprocessing:
-  outlier_method: "iqr"
+  # Outlier winsorization off by default: tree/boosting models dominate and are
+  # robust to outliers, and clipping erases predictive high-leverage tail values.
+  # Set to "iqr" to re-enable. (See PreprocessingConfig for the full rationale.)
+  outlier_method: "none"
   iqr_multiplier: 1.5
   max_null_threshold: 0.70
   max_cardinality: 50
@@ -34,8 +37,13 @@ feature_engineering:
   max_onehot_cardinality: 15
   variance_threshold: 0.01
   correlation_threshold: 0.95
-  select_k_best: 20
-  scaling_method: "standard"
+  # Keep up to 100 features by mutual information. The cut only bites on wide
+  # datasets; a low cap (was 30) silently discarded useful mid-ranked features.
+  select_k_best: 100
+  # No global scaling of the shared matrix — scale-sensitive models are wrapped in
+  # a per-fit StandardScaler at training time instead (leakage-free; trees keep
+  # raw features). Set to standard/minmax/robust to scale the shared matrix.
+  scaling_method: "none"
 
 splitting:
   train_ratio: 0.70

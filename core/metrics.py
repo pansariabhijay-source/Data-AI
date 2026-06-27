@@ -149,7 +149,30 @@ def find_optimal_threshold(
         return 0.5
     # precision/recall have one more element than thresholds; align by dropping it.
     f1 = 2 * precision[:-1] * recall[:-1] / (precision[:-1] + recall[:-1] + 1e-12)
-    best_idx = int(np.argmax(f1))
+
+    # Guard against degenerate optimisation on near-random models: when all
+    # candidate thresholds produce precision below 2× the base rate (i.e. the
+    # model can't beat a naive prior by a meaningful margin), fall back to 0.5
+    # rather than selecting a near-zero threshold that floods predictions with
+    # false positives.
+    base_rate = float(np.mean(np.asarray(y_true) == pos_label))
+    min_precision = max(2.0 * base_rate, 0.05)
+    valid_mask = precision[:-1] >= min_precision
+    if valid_mask.any():
+        # Among thresholds with acceptable precision, pick the one with best F1.
+        masked_f1 = np.where(valid_mask, f1, -1.0)
+        best_idx = int(np.argmax(masked_f1))
+    else:
+        # No threshold meets minimum precision — the model is near-random.
+        # Fall back to 0.5 to avoid flooding predictions with false positives
+        # (a near-zero F1-optimal threshold on random scores predicts almost
+        # everything as positive, which makes accuracy/precision look terrible).
+        logger.warning(
+            f"Threshold optimisation: no threshold achieves precision >= {min_precision:.3f} "
+            f"(base rate={base_rate:.3f}). Model may have near-random discriminative power. "
+            "Falling back to threshold=0.5."
+        )
+        return 0.5
     return float(thresholds[best_idx])
 
 
@@ -170,6 +193,49 @@ def predict_with_optimal_threshold(
     else:
         preds = (pos >= thr).astype(int)
     return preds, thr
+
+
+def operating_points(
+    y_true: np.ndarray,
+    pos_proba: np.ndarray,
+    pos_label: Any = 1,
+    alert_rates: tuple[float, ...] = (0.001, 0.005, 0.01, 0.02, 0.05),
+) -> list[dict]:
+    """Precision/recall at fixed *alert rates* — the way a fraud team actually
+    operates (review capacity, not an abstract threshold).
+
+    For each target fraction of transactions flagged, returns the score threshold
+    that flags that fraction and the resulting precision (of flagged, how many are
+    fraud) and recall (of all fraud, how many we caught). This answers "if we can
+    investigate X% of transactions, what do we catch?".
+    """
+    y_true = np.asarray(y_true)
+    pos = np.asarray(pos_proba, dtype=float)
+    n = len(y_true)
+    total_pos = int(np.sum(y_true == pos_label))
+    if n == 0 or total_pos == 0:
+        return []
+    order = np.argsort(-pos)  # highest risk first
+    y_sorted = (y_true[order] == pos_label).astype(int)
+    out: list[dict] = []
+    seen: set[int] = set()
+    for rate in alert_rates:
+        k = max(1, int(round(rate * n)))
+        if k in seen:
+            continue
+        seen.add(k)
+        flagged = y_sorted[:k]
+        caught = int(flagged.sum())
+        out.append({
+            "alert_rate": round(k / n, 4),
+            "threshold": round(float(pos[order[k - 1]]), 4),
+            "flagged": int(k),
+            "precision": round(caught / k, 4),
+            "recall": round(caught / total_pos, 4),
+            "caught": caught,
+            "total_fraud": total_pos,
+        })
+    return out
 
 
 def get_primary_metric(problem_type: ProblemType) -> str:

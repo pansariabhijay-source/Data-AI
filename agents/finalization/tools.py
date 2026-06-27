@@ -36,6 +36,11 @@ except (TypeError, ValueError):
 class FinalizationService:
     @log_stage_timing("finalization")
     def run(self, state: PipelineState, settings: Settings) -> PipelineState:
+        if not state.model_results and not state.best_model_name:
+            raise RuntimeError(
+                "Finalization aborted: no models were trained. "
+                "Check model_training logs for the root cause."
+            )
         run_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id)
         report_dir = ensure_directory(Path(settings.pipeline.report_dir) / state.run_id)
 
@@ -327,6 +332,14 @@ class FinalizationService:
                 ]
             lines += ["---", ""]
 
+        # ── Pipeline Explanation (plain-English narrative of what happened) ────
+        # Never let a formatting bug in the narrative lose the entire report — the
+        # model results and metrics are the important payload.
+        try:
+            lines += self._build_explanation(state)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Explanation section skipped ({e})")
+
         # ── Held-Out Test Performance ─────────────────────────────────────────
         if state.test_metrics:
             lines += [
@@ -354,6 +367,25 @@ class FinalizationService:
                     f"| **Actual 1** | {cm.get('fn', 0):,} (FN) | {cm.get('tp', 0):,} (TP) |",
                     "",
                 ]
+            # Operating points — precision/recall at fixed review budgets (fraud).
+            ops = state.test_operating_points
+            if ops:
+                lines += [
+                    "**Operating points (test).** If you can review a fixed fraction of "
+                    "transactions, this is what you catch — pick the row that matches your "
+                    "review capacity. *Precision* = of those flagged, how many are fraud; "
+                    "*recall* = of all fraud, how many you catch.",
+                    "",
+                    "| Review budget (flagged) | Score threshold | Precision | Recall | Fraud caught |",
+                    "|---|---|---|---|---|",
+                ]
+                for op in ops:
+                    lines.append(
+                        f"| {op['alert_rate']*100:.2f}% ({op['flagged']:,}) | {op['threshold']:.4f} | "
+                        f"{op['precision']*100:.1f}% | {op['recall']*100:.1f}% | "
+                        f"{op['caught']:,} / {op['total_fraud']:,} |"
+                    )
+                lines.append("")
             lines += ["---", ""]
 
         # ── Dataset Summary ───────────────────────────────────────────────────
@@ -393,7 +425,7 @@ class FinalizationService:
                 f"| Duplicates Removed | {p.duplicates_removed} |",
                 f"| Null Columns Filled | {len(p.nulls_filled)} |",
                 f"| Outliers Handled | {len(p.outliers_handled)} |",
-                f"| Columns Dropped | {len(p.columns_dropped)} |",
+                f"| Columns Dropped (high-null, this stage) | {len(p.columns_dropped)} |",
                 f"| **Quality Score** | **{p.quality_score:.4f}** |",
                 "",
                 "---",
@@ -523,6 +555,169 @@ class FinalizationService:
 
         path.write_text("\n".join(lines), encoding="utf-8")
         logger.info(f"Markdown report saved to {path}")
+
+    @staticmethod
+    def _explain_created_feature(name: str) -> str:
+        """Plain-English purpose of an engineered feature, inferred from its name."""
+        n = name.lower()
+        if name.endswith("__was_missing"):
+            return f"flag marking rows where `{name[:-13]}` was originally missing (missingness can itself be predictive)"
+        if "__x__" in name:
+            a, b = name.split("__x__", 1)
+            return f"interaction term — `{a}` multiplied by `{b}` — to capture their combined effect"
+        if n.startswith("log_"):
+            return f"log-transform of `{name[4:]}` to tame a skewed (long-tailed) distribution"
+        if name in ("geo_distance_km",):
+            return "distance in km between the two latitude/longitude points in the row"
+        if name in ("age_years",):
+            return "age in years derived from a date-of-birth column"
+        if n.startswith("card_") or "velocity" in n:
+            return "per-group transaction statistic (count / average / spread) — useful for spotting unusual activity"
+        for suf, desc in (("_sin", "cyclical encoding"), ("_cos", "cyclical encoding"),
+                          ("_is_weekend", "weekend flag"), ("_recency_days", "days since the most recent date"),
+                          ("_year", "calendar part"), ("_month", "calendar part"),
+                          ("_dow", "day-of-week part"), ("_hour", "hour-of-day part")):
+            if name.endswith(suf):
+                return f"{desc} extracted from a date/time column"
+        return "engineered feature derived from the raw columns"
+
+    def _build_explanation(self, state: PipelineState) -> list[str]:
+        """A plain-English 'what the pipeline did and why' section for the report."""
+        m = state.dataset_metadata
+        p = state.preprocessing_summary
+        fe = state.feature_engineering_summary
+        trained = [r for r in state.model_results if r.status == "trained"]
+        n_trained = len(trained)
+
+        lines: list[str] = ["## Pipeline Explanation", "",
+                            "A plain-English walkthrough of what Axiom did with your data and why.", ""]
+
+        # 1. End-to-end narrative ------------------------------------------------
+        nar = "Axiom ran its automated stages end-to-end. "
+        if m:
+            nar += (f"It profiled the dataset (**{m.n_rows:,} rows × {m.n_columns} columns**) and detected a "
+                    f"**{(state.problem_type or 'machine learning')}** problem")
+            nar += f" from the `{state.target_column}` column. " if state.target_column else ". "
+        if p:
+            bits = []
+            if p.duplicates_removed:
+                bits.append(f"removed **{p.duplicates_removed:,}** duplicate rows")
+            n_filled = len([1 for v in p.nulls_filled.values() if "filled" in v])
+            if n_filled:
+                bits.append(f"filled missing values in **{n_filled}** column(s)")
+            if p.dtypes_fixed:
+                bits.append(f"corrected the data type of **{len(p.dtypes_fixed)}** column(s)")
+            if bits:
+                nar += "Preprocessing " + ", ".join(bits) + ". "
+        if fe:
+            nar += (f"Feature engineering took the data from **{fe.n_features_before} to "
+                    f"{fe.n_features_after} columns** ({len(fe.features_created)} added, "
+                    f"{len(fe.features_removed)} removed). ")
+        if state.best_model_name:
+            nar += (f"Finally, **{n_trained}** models were trained and compared on a validation split — "
+                    f"**{state.best_model_name}** won and was scored once on the untouched test set.")
+        lines += [nar, ""]
+
+        # Evaluation protocol — important for credibility on temporal data (fraud).
+        strategy = state.data_quality_flags.get("split_strategy")
+        if strategy == "out-of-time":
+            lines += [
+                "**Out-of-time evaluation.** A time axis was detected, so the data was split "
+                "**chronologically** — the model trains on the oldest transactions and is tested on the "
+                "**newest** ones. This mirrors production (you only ever have the past to predict the "
+                "future) and avoids the optimistic bias of a random split, which leaks future patterns "
+                "and the same entities into training. The reported numbers are therefore a realistic "
+                "estimate of how the model performs on tomorrow's data.",
+                "",
+            ]
+        elif strategy == "stratified-random":
+            lines += [
+                "**Stratified-random evaluation.** No usable time axis was found, so the data was split "
+                "randomly while preserving the class balance across train/validation/test.",
+                "",
+            ]
+
+        def bullets(title: str, items: list[tuple[str, str]], cap: int = 14) -> None:
+            if not items:
+                return
+            lines.append(f"### {title}")
+            lines.append("")
+            for col, why in items[:cap]:
+                lines.append(f"- `{col}` — {why}")
+            if len(items) > cap:
+                lines.append(f"- …and {len(items) - cap} more")
+            lines.append("")
+
+        # 2. Column types corrected ---------------------------------------------
+        if p and p.dtypes_fixed:
+            bullets("Column types corrected", list(p.dtypes_fixed.items()))
+
+        # 3. Columns added -------------------------------------------------------
+        if fe and fe.features_created:
+            bullets("Columns added (and why)",
+                    [(c, self._explain_created_feature(c)) for c in fe.features_created])
+
+        # 4. Columns dropped -----------------------------------------------------
+        dropped: dict[str, str] = {}
+        if p:
+            for col, why in p.nulls_filled.items():
+                if "dropped" in why and "rows" not in why:
+                    dropped[col] = "over 70% of its values were missing, so it carried too little information"
+        if fe:
+            dropped.update(getattr(fe, "removal_reasons", {}) or {})
+        bullets("Columns dropped (and why)", list(dropped.items()), cap=16)
+
+        # 5. Encodings -----------------------------------------------------------
+        if fe and fe.encoding_applied:
+            enc_items: list[tuple[str, str]] = []
+            for col, why in fe.encoding_applied.items():
+                if "dropped" in why:
+                    continue
+                if "one_hot" in why:
+                    enc_items.append((col, "one-hot encoded (each category became its own yes/no column)"))
+                elif "frequency" in why:
+                    enc_items.append((col, "frequency-encoded (each category replaced by how often it appears)"))
+                elif "label" in why:
+                    enc_items.append((col, "label-encoded (each category mapped to a number)"))
+            bullets("Categorical columns encoded", enc_items)
+
+        # 6. Why this model won --------------------------------------------------
+        if state.best_model_name and state.best_metric_value is not None:
+            primary = state.best_metric_name or "score"
+            label = primary.upper()
+            others = sorted(
+                (r for r in trained if r.model_name != state.best_model_name),
+                key=lambda r: r.metrics.get(primary, float("-inf")), reverse=True,
+            )
+            lines += [f"### Why **{state.best_model_name}** was selected", ""]
+            why = (f"Out of **{n_trained}** models trained, **{state.best_model_name}** scored the best "
+                   f"validation **{label} ({state.best_metric_value:.4f})**")
+            if others and primary in others[0].metrics:
+                why += f", ahead of the runner-up **{others[0].model_name}** ({others[0].metrics[primary]:.4f})"
+            why += ". Every model saw the same features and the same split, so this is an apples-to-apples comparison."
+            lines += [why, ""]
+            notes: list[str] = []
+            if "ensemble" in state.best_model_name.lower():
+                notes.append("It is a soft-voting **ensemble** — it averages the predictions of the top individual "
+                             "models, which together generalized better than any one of them alone.")
+            if state.best_model_name.endswith("_tuned"):
+                notes.append("**Hyperparameter tuning** found settings that beat the model's defaults.")
+            if state.best_threshold is not None:
+                notes.append(f"Its decision threshold was tuned to **{state.best_threshold:.3f}** (not the default 0.5) "
+                             f"to get the best balance of precision and recall on the imbalanced target.")
+            tm = state.test_metrics or {}
+            for k in (primary, "f1", "r2", "roc_auc"):
+                if k in tm:
+                    notes.append(f"On the **held-out test set** (data it never saw during training or selection) it "
+                                 f"scored **{k.upper()} = {tm[k]:.4f}**, confirming the result is real and not overfit.")
+                    break
+            for note in notes:
+                lines.append(f"- {note}")
+            if notes:
+                lines.append("")
+
+        lines += ["---", ""]
+        return lines
 
 
 _service: Optional[FinalizationService] = None

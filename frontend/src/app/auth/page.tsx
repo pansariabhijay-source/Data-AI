@@ -98,10 +98,7 @@ export default function AuthPage() {
           transition={{ duration: 0.6, ease: [0.25, 0.4, 0, 1] }}
           className="relative z-10 flex items-center gap-2.5"
         >
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center shadow-[0_6px_24px_rgba(99,102,241,0.4)]">
-            <span className="text-white font-bold">A</span>
-          </div>
-          <span className="text-[17px] font-semibold tracking-tight text-text-primary font-display">Axiom</span>
+          <img src="/logo.png" alt="Axiom" className="h-9 w-auto object-contain" />
         </motion.div>
 
         <motion.div
@@ -147,10 +144,7 @@ export default function AuthPage() {
         >
           {/* Mobile brand */}
           <div className="lg:hidden flex items-center gap-2.5 mb-10">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center">
-              <span className="text-white font-bold">A</span>
-            </div>
-            <span className="text-[17px] font-semibold tracking-tight text-text-primary font-display">Axiom</span>
+            <img src="/logo.png" alt="Axiom" className="h-9 w-auto object-contain" />
           </div>
 
           <h1 className="font-display text-[34px] tracking-[-0.01em] leading-tight text-text-primary">

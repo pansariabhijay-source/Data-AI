@@ -50,6 +50,9 @@ class PreprocessingSummary(BaseModel):
 class FeatureEngineeringSummary(BaseModel):
     features_created: list[str] = Field(default_factory=list)
     features_removed: list[str] = Field(default_factory=list)
+    # Human-readable reason per removed feature (col -> why), for the report's
+    # explanation section. Covers leakage / ID / (near-)constant / correlated drops.
+    removal_reasons: dict[str, str] = Field(default_factory=dict)
     encoding_applied: dict[str, str] = Field(default_factory=dict)
     scaling_applied: dict[str, str] = Field(default_factory=dict)
     feature_importances: dict[str, float] = Field(default_factory=dict)
@@ -130,6 +133,9 @@ class PipelineState(BaseModel):
     # at the chosen decision threshold). Empty until the test split is scored.
     test_metrics: dict[str, float] = Field(default_factory=dict)
     test_confusion: dict[str, int] = Field(default_factory=dict)
+    # Precision/recall at fixed alert rates on the test set (binary classification),
+    # for choosing an operating point given review capacity (fraud use case).
+    test_operating_points: list[dict[str, Any]] = Field(default_factory=list)
 
     # Summaries
     preprocessing_summary: Optional[PreprocessingSummary] = None

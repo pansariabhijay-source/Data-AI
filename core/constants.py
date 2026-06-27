@@ -110,10 +110,24 @@ DEFAULT_MAX_OUTLIER_FRACTION: float = 0.05
 DEFAULT_MAX_ONEHOT_CARDINALITY: int = 15
 DEFAULT_VARIANCE_THRESHOLD: float = 0.01
 DEFAULT_CORRELATION_THRESHOLD: float = 0.95
-DEFAULT_SELECT_K_BEST: int = 20
+# Keep up to this many features by mutual information. A low cap silently discards
+# useful mid-ranked features on moderately-wide datasets; the cut should only bite
+# when the feature space is genuinely large.
+DEFAULT_SELECT_K_BEST: int = 100
 # Categorical columns whose unique-value ratio exceeds this are ID-like (e.g. user_id,
 # transaction_id) and are dropped rather than label-encoded into pure noise.
 DEFAULT_ID_UNIQUENESS_RATIO: float = 0.5
+# Numeric columns whose unique-value ratio exceeds this are near-unique ID-like
+# columns (e.g. User_ID, transaction_id stored as int) and are dropped on the
+# uniqueness signal alone. Set high (0.99) so genuine high-cardinality measurements
+# (prices, timestamps, counts stored as int) are NOT mistaken for IDs — those are
+# only dropped when the column NAME also matches an ID pattern.
+DEFAULT_NUMERIC_ID_UNIQUENESS_RATIO: float = 0.99
+# When a numeric column's NAME matches an ID pattern (id/key/no/num/code/seq...),
+# only treat it as an ID if its uniqueness ratio also exceeds this. Protects
+# low-cardinality coded categoricals (e.g. an integer "area_code" / "product_code"
+# with a handful of levels) from being dropped purely on their name.
+DEFAULT_NUMERIC_ID_NAME_MIN_RATIO: float = 0.5
 
 # Problem-type detection — a numeric target with more distinct values than this
 # is treated as regression, never classification (479-class "Volume" is not a
@@ -137,14 +151,14 @@ DEFAULT_TIMEOUT_PER_MODEL: int = 300  # seconds
 # threshold + PR-AUC selection) on creditcard — champion f1 0.846 (weighting) vs
 # 0.830 (SMOTE). Kept fully wired and configurable: set training.use_smote=True
 # (or env USE_SMOTE=true) to enable for datasets where it helps.
-DEFAULT_USE_SMOTE: bool = False
+DEFAULT_USE_SMOTE: bool = True
 # Target minority/majority ratio after oversampling. PARTIAL on purpose: moderate
 # oversampling (0.1-0.5) helps in isolation, but fully balancing (1.0) empirically
 # hurts gradient boosters. 0.25 is a safe middle ground when enabled.
 DEFAULT_SMOTE_SAMPLING_STRATEGY: float = 0.25
 # Only resample when the minority class is below this fraction of all rows; data
 # that is already reasonably balanced is left untouched.
-DEFAULT_SMOTE_MIN_MINORITY_FRACTION: float = 0.20
+DEFAULT_SMOTE_MIN_MINORITY_FRACTION: float = 0.15
 # Skip SMOTE above this many training rows (synthetic blow-up / cost guard).
 DEFAULT_SMOTE_MAX_TRAIN_SAMPLES: int = 500_000
 DEFAULT_SMOTE_K_NEIGHBORS: int = 5
@@ -153,6 +167,13 @@ DEFAULT_SMOTE_K_NEIGHBORS: int = 5
 DEFAULT_MIN_CLASSIFICATION_F1: float = 0.30
 DEFAULT_MIN_REGRESSION_R2: float = 0.10
 DEFAULT_OVERFITTING_THRESHOLD: float = 0.15
+# Only flag overfitting when validation performance is ALSO weak. A large train-val
+# gap is expected and benign for tree/boosting models (they memorise the training
+# set → train≈1.0), so the gap alone over-reports. Genuine overfitting shows up as a
+# large gap together with a mediocre validation score; if val is at/above this bar
+# the model generalises fine and isn't flagged. Applies to higher-is-better primary
+# metrics (f1, r2), which are bounded so a single bar is meaningful.
+DEFAULT_OVERFITTING_MIN_VAL_SCORE: float = 0.80
 DEFAULT_MAX_FEATURE_COUNT: int = 500
 
 # Improvement
@@ -171,6 +192,18 @@ DEFAULT_EARLY_STOPPING_ROUNDS: int = 10
 DEFAULT_TUNING_TARGET_METRIC: float = 0.0
 DEFAULT_TUNING_MAX_ITERATIONS: int = 3
 DEFAULT_TUNING_PATIENCE: int = 1
+
+# Out-of-time (chronological) splitting. Fraud and most transactional data are
+# temporal: a random split lets a model "see the future" (and the same card/user
+# can land in both train and test), inflating offline metrics vs production. When a
+# usable time axis is present the splitter sorts by it and takes the oldest rows for
+# train and the newest for test — the evaluation a fraud team must report. This
+# hidden column carries the primary timestamp from feature engineering to the
+# splitter; the splitter drops it before saving so models never see it.
+AXIOM_SPLIT_TIME_COL: str = "__axiom_split_time__"
+# Column-name patterns that identify a raw time axis (used in addition to the
+# hidden key, e.g. creditcard's numeric "Time" column that survives as a feature).
+TIME_COLUMN_NAME_PATTERN: str = r"(?i)(^|_)(time|date|datetime|timestamp|epoch|step)($|_)"
 
 # Data loading
 DEFAULT_CHUNK_SIZE: int = 50_000

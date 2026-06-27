@@ -62,14 +62,22 @@ class ErrorDetectionService:
             if train_val is None or val_val is None:
                 continue
             gap = (train_val - val_val) if higher else (val_val - train_val)
-            if gap > self._config.overfitting_threshold:
-                errors.append(ErrorReport(
-                    severity=Severity.MEDIUM.value, stage="model_training",
-                    error_type="overfitting",
-                    root_cause=f"{r.model_name}: train_{primary}={train_val:.4f}, val_{primary}={val_val:.4f}, gap={gap:.4f}",
-                    recommended_fix=f"Add regularization, reduce model complexity, or increase training data for {r.model_name}",
-                    retryable=True,
-                ))
+            if gap <= self._config.overfitting_threshold:
+                continue
+            # A large gap alone is benign for tree/boosting models — they memorise
+            # the training set (train≈1.0) yet can still generalise well. Only flag
+            # when validation is ALSO weak (real overfitting that costs accuracy);
+            # a model already scoring well on val isn't a problem worth surfacing.
+            min_val = getattr(self._config, "overfitting_min_val_score", 0.80)
+            if higher and val_val >= min_val:
+                continue
+            errors.append(ErrorReport(
+                severity=Severity.MEDIUM.value, stage="model_training",
+                error_type="overfitting",
+                root_cause=f"{r.model_name}: train_{primary}={train_val:.4f}, val_{primary}={val_val:.4f}, gap={gap:.4f}",
+                recommended_fix=f"Add regularization, reduce model complexity, or increase training data for {r.model_name}",
+                retryable=True,
+            ))
         return errors
 
     def _check_feature_explosion(self, state: PipelineState) -> list[ErrorReport]:

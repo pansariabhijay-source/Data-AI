@@ -27,6 +27,7 @@ from core.metrics import (
     compute_metrics,
     confusion_counts,
     get_primary_metric,
+    operating_points,
     positive_class_proba,
     predict_with_optimal_threshold,
     selection_score,
@@ -38,6 +39,7 @@ from core.model_registry import (
     build_default_registry,
     fit_model,
     get_fitted_n_estimators,
+    maybe_wrap_scaler,
 )
 from core.resampling import maybe_resample
 from core.state import ErrorReport, ExperimentRecord, ModelResult, PipelineState
@@ -152,20 +154,38 @@ class ModelTrainingService:
             # When the training set was already (partially) balanced by SMOTE, turn
             # off the model's own class-weighting so the imbalance isn't corrected
             # twice (which over-shifts the decision boundary and hurts precision).
+            # This must cover ALL weighting mechanisms:
+            #   • sklearn models  → class_weight="balanced"
+            #   • LightGBM        → is_unbalance=True  (NOT class_weight!)
+            #   • XGBoost         → scale_pos_weight   (handled by apply_imbalance_handling guard below)
             overrides = {}
-            if resampled and "class_weight" in spec.default_params:
-                overrides["class_weight"] = None
+            if resampled:
+                if "class_weight" in spec.default_params:
+                    overrides["class_weight"] = None
+                if spec.default_params.get("is_unbalance"):
+                    overrides["is_unbalance"] = False
             model = self._registry.create_instance(problem_type, spec.name, overrides or None)
             if problem_type == ProblemType.CLUSTERING:
-                model.fit(X_train)
-                preds = model.predict(X_train) if hasattr(model, "predict") else model.labels_
-                metrics = compute_metrics(X_train, preds, problem_type)
+                # Distance-based clusterers need scaled features. Scale locally here
+                # (rather than in the shared matrix) so the transform is self-contained;
+                # clustering has no held-out split or downstream serving to leak into.
+                X_fit = X_train
+                if spec.requires_scaling:
+                    from sklearn.preprocessing import StandardScaler
+                    X_fit = StandardScaler().fit_transform(X_train)
+                model.fit(X_fit)
+                preds = model.predict(X_fit) if hasattr(model, "predict") else model.labels_
+                metrics = compute_metrics(X_fit, preds, problem_type)
                 train_metrics = metrics.copy()
             else:
                 # Inject data-dependent imbalance params (e.g. scale_pos_weight) before
                 # fit — unless SMOTE already balanced the data (see above).
                 if not resampled:
                     model = apply_imbalance_handling(model, spec, y_train)
+                # Scale-sensitive models (linear/SVC) get a per-fit StandardScaler so
+                # they see standardized features WITHOUT leaking test stats; trees are
+                # left on raw features. No-op for tree/boosting models.
+                model = maybe_wrap_scaler(model, spec)
                 # Use early stopping against the validation set for boosters when we
                 # have a genuine (non-degenerate) validation split.
                 eval_X = X_val if has_validation else None
@@ -267,11 +287,15 @@ class ModelTrainingService:
             for tr_idx, va_idx in splitter.split(Xc, yc):
                 try:
                     overrides = {}
-                    if resampled and "class_weight" in spec.default_params:
-                        overrides["class_weight"] = None
+                    if resampled:
+                        if "class_weight" in spec.default_params:
+                            overrides["class_weight"] = None
+                        if spec.default_params.get("is_unbalance"):
+                            overrides["is_unbalance"] = False
                     model = self._registry.create_instance(problem_type, spec.name, overrides or None)
                     if not resampled:
                         model = apply_imbalance_handling(model, spec, yc[tr_idx])
+                    model = maybe_wrap_scaler(model, spec)
                     model = fit_model(model, spec, Xc[tr_idx], yc[tr_idx])
                     y_prob = None
                     if spec.supports_probabilities and hasattr(model, "predict_proba"):
@@ -479,6 +503,20 @@ class ModelTrainingService:
             cm = confusion_counts(y_test, preds)
             if cm:
                 state.test_confusion = cm
+            # Operating points (precision/recall at fixed alert rates) — lets a fraud
+            # team pick a threshold for their review capacity.
+            if (
+                problem_type == ProblemType.CLASSIFICATION
+                and y_prob is not None and len(np.unique(y_test)) == 2
+            ):
+                try:
+                    classes = np.asarray(getattr(model, "classes_", [0, 1]))
+                    pos_label = classes[1] if len(classes) == 2 else 1
+                    state.test_operating_points = operating_points(
+                        y_test, positive_class_proba(y_prob), pos_label=pos_label,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Operating-point computation skipped: {e}")
             logger.info(f"Held-out TEST metrics: {state.test_metrics}")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Test-set evaluation failed (non-critical): {e}")
@@ -626,6 +664,26 @@ class ModelTrainingService:
             state.best_threshold = best.decision_threshold
             thr_note = f", threshold={best.decision_threshold:.4f}" if best.decision_threshold is not None else ""
             logger.info(f"Best model: {best.model_name} ({primary_metric}={best.metrics[primary_metric]:.4f}{thr_note}, sel_score={score_of(best):.4f})")
+
+            # Detect near-random performance: if the best model's ROC-AUC is below
+            # 0.55 (barely above coin-flip), the dataset likely has insufficient
+            # signal for reliable ML. Surface this as a clear warning rather than
+            # letting the user interpret cryptic numbers.
+            if problem_type == ProblemType.CLASSIFICATION and n_classes == 2:
+                best_roc = best.metrics.get("roc_auc", 1.0)
+                if best_roc < 0.55:
+                    warning_msg = (
+                        f"LOW SIGNAL WARNING: best model ROC-AUC={best_roc:.3f} (near random 0.5). "
+                        "This typically means the dataset's features have very low predictive "
+                        "power for the target. Check that (1) the correct target column is "
+                        "selected, (2) informative features are present and not dropped, and "
+                        "(3) the target labels are not randomly assigned."
+                    )
+                    logger.warning(warning_msg)
+                    state.data_quality_flags["low_signal"] = {
+                        "best_roc_auc": best_roc,
+                        "warning": warning_msg,
+                    }
 
             # Calibrate the champion's probabilities (monotonic — selection above
             # is unchanged) so its threshold and probability outputs are trustworthy.

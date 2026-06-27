@@ -38,6 +38,7 @@ from core.constants import (
     DEFAULT_MIN_REGRESSION_R2,
     DEFAULT_MIN_UNIQUE_FOR_OUTLIER,
     DEFAULT_N_JOBS,
+    DEFAULT_OVERFITTING_MIN_VAL_SCORE,
     DEFAULT_OVERFITTING_THRESHOLD,
     DEFAULT_RANDOM_SEED,
     DEFAULT_SAMPLE_ROWS,
@@ -100,7 +101,14 @@ class DataCollectionConfig(BaseModel):
 class PreprocessingConfig(BaseModel):
     """Data cleaning and preprocessing settings."""
 
-    outlier_method: str = "iqr"
+    # Outlier winsorization is OFF by default. The model registry is dominated by
+    # tree / gradient-boosting models whose splits are rank-based and therefore
+    # robust to outliers, and clipping the extreme tail (e.g. very large fraud
+    # amounts, high-priced homes) erases exactly the high-leverage values that
+    # carry signal. Ablation showed IQR clipping lowered held-out R²/F1 vs leaving
+    # it off. Scale-sensitive linear models get a per-fit StandardScaler in the
+    # training stage instead. Set outlier_method="iqr" to re-enable.
+    outlier_method: str = "none"
     iqr_multiplier: float = DEFAULT_IQR_MULTIPLIER
     max_null_threshold: float = DEFAULT_MAX_NULL_THRESHOLD
     max_cardinality: int = DEFAULT_MAX_CARDINALITY
@@ -123,9 +131,22 @@ class FeatureEngineeringConfig(BaseModel):
     variance_threshold: float = DEFAULT_VARIANCE_THRESHOLD
     correlation_threshold: float = DEFAULT_CORRELATION_THRESHOLD
     select_k_best: int = DEFAULT_SELECT_K_BEST
-    scaling_method: str = "standard"
+    # Scaling is NOT applied to the shared feature matrix. A single scaler fit on
+    # the full dataset before the split leaks test statistics, and scaling hurts
+    # the tree/boosting models that usually win. Instead, scale-sensitive models
+    # are wrapped in a per-fit StandardScaler at training time (see
+    # core.model_registry.maybe_wrap_scaler), which is leakage-free and keeps trees
+    # on raw, interpretable features. Set scaling_method to standard/minmax/robust
+    # to also scale the shared matrix (legacy behaviour).
+    scaling_method: str = "none"
     id_uniqueness_ratio: float = DEFAULT_ID_UNIQUENESS_RATIO
     drop_leakage_columns: bool = True
+    # Explicit pairwise multiplicative interactions are OFF by default. The
+    # gradient-boosting / tree models that usually win capture feature interactions
+    # natively, so adding O(top_n^2) products mostly injects noise columns (e.g.
+    # products of weak/noise features) that dilute the signal and can lower the
+    # held-out score. Enable for linear-only problems where interactions help.
+    enable_interactions: bool = False
 
 
 class SplittingConfig(BaseModel):
@@ -134,6 +155,12 @@ class SplittingConfig(BaseModel):
     train_ratio: float = DEFAULT_TRAIN_RATIO
     val_ratio: float = DEFAULT_VAL_RATIO
     test_ratio: float = DEFAULT_TEST_RATIO
+    # Out-of-time splitting: "auto" uses a chronological split when a usable time
+    # axis is detected (train=oldest, val=middle, test=newest), else falls back to a
+    # stratified random split. "off" forces stratified random; "on" requires a time
+    # column. Out-of-time evaluation is the correct, leakage-free protocol for
+    # temporal data like fraud (random splitting leaks the future).
+    time_aware_split: str = "auto"
 
     @field_validator("test_ratio")
     @classmethod
@@ -175,6 +202,7 @@ class ErrorDetectionConfig(BaseModel):
     min_classification_f1: float = DEFAULT_MIN_CLASSIFICATION_F1
     min_regression_r2: float = DEFAULT_MIN_REGRESSION_R2
     overfitting_threshold: float = DEFAULT_OVERFITTING_THRESHOLD
+    overfitting_min_val_score: float = DEFAULT_OVERFITTING_MIN_VAL_SCORE
     max_feature_count: int = DEFAULT_MAX_FEATURE_COUNT
 
 

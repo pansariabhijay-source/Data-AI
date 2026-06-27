@@ -52,6 +52,9 @@ def test_drop_high_null_columns(service):
 
 
 def test_handle_outliers_iqr(service):
+    # IQR winsorization is opt-in (default "none" — trees are robust and clipping
+    # erases predictive tail values). Enable it to test the clipping path.
+    service._config.outlier_method = "iqr"
     # Continuous column with a small fraction of genuine extreme outliers.
     rng = np.random.RandomState(0)
     vals = list(rng.normal(50, 5, 200)) + [5000.0, 6000.0]
@@ -64,6 +67,7 @@ def test_handle_outliers_iqr(service):
 def test_outliers_preserve_minority_signal(service):
     # A binary-ish column where 16% of rows are the "1" cluster: those values are
     # the minority class, NOT outliers, and must survive winsorization.
+    service._config.outlier_method = "iqr"
     col = [0.0] * 168 + [1.0] * 32
     df = pd.DataFrame({"flag": col})
     result, handled = service.handle_outliers(df)
@@ -73,6 +77,7 @@ def test_outliers_preserve_minority_signal(service):
 
 def test_outliers_skip_discrete(service):
     # Low-cardinality integer column (encoded category) is treated as discrete.
+    service._config.outlier_method = "iqr"
     df = pd.DataFrame({"cat_code": ([1, 2, 3, 4, 5] * 40) + [99]})
     result, handled = service.handle_outliers(df)
     assert "cat_code" not in handled

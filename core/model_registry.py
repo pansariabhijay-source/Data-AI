@@ -136,11 +136,18 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
         registry.register(ModelSpec(
             name="XGBClassifier", problem_type=ProblemType.CLASSIFICATION,
             factory=XGBClassifier,
-            default_params={"n_estimators": 300, "random_state": seed, "eval_metric": "aucpr",
-                            "use_label_encoder": False, "verbosity": 0, "n_jobs": -1},
-            search_space={"n_estimators": [100, 200, 300], "max_depth": [3, 5, 7],
-                          "learning_rate": [0.01, 0.05, 0.1, 0.3], "subsample": [0.8, 1.0],
-                          "colsample_bytree": [0.8, 1.0]},
+            default_params={
+                "n_estimators": 500, "random_state": seed, "eval_metric": "aucpr",
+                "use_label_encoder": False, "verbosity": 0, "n_jobs": -1,
+                "subsample": 0.8, "colsample_bytree": 0.8,
+                "reg_alpha": 0.1, "reg_lambda": 1.0,
+                "min_child_weight": 5,
+                "max_depth": 6,
+                "learning_rate": 0.05,
+            },
+            search_space={"n_estimators": [300, 500, 800], "max_depth": [4, 6, 8],
+                          "learning_rate": [0.01, 0.05, 0.1], "subsample": [0.7, 0.8, 1.0],
+                          "colsample_bytree": [0.7, 0.8, 1.0], "min_child_weight": [1, 5, 10]},
             supports_probabilities=True,
             imbalance_param="scale_pos_weight",
             supports_early_stopping=True,
@@ -153,10 +160,18 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
         registry.register(ModelSpec(
             name="LGBMClassifier", problem_type=ProblemType.CLASSIFICATION,
             factory=LGBMClassifier,
-            default_params={"n_estimators": 300, "random_state": seed, "verbose": -1, "n_jobs": -1,
-                            "class_weight": "balanced"},
-            search_space={"n_estimators": [100, 200, 300], "num_leaves": [15, 31, 63],
-                          "learning_rate": [0.01, 0.05, 0.1, 0.3]},
+            default_params={
+                "n_estimators": 500, "random_state": seed, "verbose": -1, "n_jobs": -1,
+                "is_unbalance": True,
+                "subsample": 0.8, "colsample_bytree": 0.8,
+                "reg_alpha": 0.1, "reg_lambda": 1.0,
+                "min_child_samples": 20,
+                "num_leaves": 63,
+                "learning_rate": 0.05,
+            },
+            search_space={"n_estimators": [300, 500, 800], "num_leaves": [31, 63, 127],
+                          "learning_rate": [0.01, 0.05, 0.1], "min_child_samples": [10, 20, 50],
+                          "subsample": [0.7, 0.8, 1.0], "colsample_bytree": [0.7, 0.8, 1.0]},
             supports_probabilities=True,
             supports_early_stopping=True,
         ))
@@ -259,6 +274,31 @@ def build_default_registry(seed: int = 42) -> ModelRegistry:
     return registry
 
 
+def maybe_wrap_scaler(model: Any, spec: ModelSpec) -> Any:
+    """Wrap scale-sensitive supervised models in a per-fit ``StandardScaler``.
+
+    Scaling belongs *inside* the model, not baked into the shared feature matrix:
+      * a global scaler fit on the full dataset BEFORE the train/val/test split
+        leaks test-set statistics into training;
+      * tree / gradient-boosting models (which usually win) are scale-invariant,
+        so scaling the shared matrix is at best a no-op and at worst perturbs
+        their split points and destroys feature interpretability.
+
+    By wrapping only the models whose ``spec.requires_scaling`` is set
+    (LogisticRegression, SVC, LinearRegression, Ridge) the scaler is re-fit on
+    each training fold — no leakage — while trees keep their raw features. The
+    resulting ``Pipeline`` is a drop-in: it exposes ``predict``/``predict_proba``/
+    ``classes_`` and pickles cleanly. Clustering models scale separately (their
+    ``fit`` has no ``predict`` to delegate through a pipeline).
+    """
+    if not spec.requires_scaling or spec.problem_type == ProblemType.CLUSTERING:
+        return model
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    return Pipeline([("scaler", StandardScaler()), ("model", model)])
+
+
 def fit_model(
     model: Any,
     spec: ModelSpec,
@@ -286,9 +326,24 @@ def fit_model(
                 model.fit(X_train, y_train, eval_set=[(eval_X, eval_y)], verbose=False)
                 return model
             if module.startswith("lightgbm"):
-                from lightgbm import early_stopping as _lgb_early_stopping
+                # is_unbalance=True or scale_pos_weight re-weights the training loss
+                # but the validation metric is computed on the raw (unweighted) set.
+                # The first tree captures the base-rate well (decent AUC) then
+                # subsequent trees optimise the *weighted* objective, temporarily
+                # lowering unweighted AUC — this causes early stopping to fire at
+                # iteration 1. Skip early stopping when imbalance weighting is active;
+                # the fixed n_estimators budget is sufficient for tabular data.
+                params = model.get_params()
+                has_imbalance_weight = (
+                    params.get("is_unbalance", False)
+                    or (params.get("scale_pos_weight") not in (None, 1.0, 1))
+                )
+                if has_imbalance_weight:
+                    model.fit(X_train, y_train)
+                    return model
 
-                eval_metric = "average_precision" if hasattr(model, "predict_proba") else "rmse"
+                from lightgbm import early_stopping as _lgb_early_stopping
+                eval_metric = "auc" if hasattr(model, "predict_proba") else "rmse"
                 model.set_params(n_estimators=max_estimators)
                 model.fit(
                     X_train, y_train,
