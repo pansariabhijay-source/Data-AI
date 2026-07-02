@@ -17,9 +17,15 @@ import pandas as pd
 from core.config import Settings
 from core.constants import ProblemType
 from core.logging_config import get_logger, log_stage_timing
-from core.metrics import compute_metrics, confusion_counts, positive_class_proba
+from core.metrics import (
+    bootstrap_metric_cis,
+    compute_metrics,
+    confusion_counts,
+    positive_class_proba,
+    target_inverse_transform,
+)
 from core.state import ErrorReport, PipelineState
-from core.utils import ensure_directory, get_timestamp, safe_json_serialize
+from core.utils import build_model_matrix, ensure_directory, get_timestamp, safe_json_serialize
 
 logger = get_logger("finalization")
 
@@ -31,6 +37,14 @@ try:
     _SHAP_KERNEL_NSAMPLES = int(os.environ.get("SHAP_KERNEL_NSAMPLES", "100"))
 except (TypeError, ValueError):
     _SHAP_KERNEL_NSAMPLES = 100
+
+# Number of bootstrap resamples for test-metric confidence intervals (0 disables).
+# The test set is resampled with replacement this many times; cost is bounded
+# further by a row cap inside bootstrap_metric_cis.
+try:
+    _BOOTSTRAP_CI_N = int(os.environ.get("BOOTSTRAP_CI_N", "500"))
+except (TypeError, ValueError):
+    _BOOTSTRAP_CI_N = 500
 
 
 class FinalizationService:
@@ -58,6 +72,7 @@ class FinalizationService:
             "best_value": state.best_metric_value,
             "decision_threshold": state.best_threshold,
             "test_metrics": state.test_metrics,
+            "test_metric_cis": state.test_metric_cis,
             "test_confusion": state.test_confusion,
             "total_retries": state.retry_count,
             "completed_stages": state.completed_stages,
@@ -84,6 +99,10 @@ class FinalizationService:
             "expected_features": list(state.selected_features or []),
             "n_expected_features": len(state.selected_features or []),
             "encodings": getattr(fe, "encodings_applied", None) if fe else None,
+            # If the regression target was log-transformed for training, the model
+            # predicts in log-space — apply this inverse (expm1) to raw predictions
+            # to recover the target's original units. None for untransformed targets.
+            "target_transform": state.data_quality_flags.get("log_transformed_target"),
             "dropped_as_leakage": state.data_quality_flags.get("potential_leakage") or [],
             "how_to_use": (
                 "Load `model_file` with joblib. It expects `expected_features` (already "
@@ -157,7 +176,7 @@ class FinalizationService:
             target = state.target_column
             if not target or target not in test_df.columns:
                 return
-            X_test = test_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+            X_test, _ = build_model_matrix(test_df, target, state.selected_features)
             y_test = test_df[target].values
             model = joblib.load(state.best_model_path)
 
@@ -180,10 +199,23 @@ class FinalizationService:
             else:
                 preds = model.predict(X_test)
 
-            state.test_metrics = compute_metrics(y_test, preds, problem_type, y_prob)
+            inv = target_inverse_transform(state.data_quality_flags)
+            state.test_metrics = compute_metrics(
+                y_test, preds, problem_type, y_prob, inverse_transform=inv,
+            )
             cm = confusion_counts(y_test, preds)
             if cm:
                 state.test_confusion = cm
+            # Bootstrap confidence intervals so the single-slice test score reports
+            # its own uncertainty (e.g. "PR-AUC 0.78 [0.74, 0.82]").
+            if _BOOTSTRAP_CI_N > 0:
+                try:
+                    state.test_metric_cis = bootstrap_metric_cis(
+                        y_test, preds, problem_type, y_prob,
+                        inverse_transform=inv, n_boot=_BOOTSTRAP_CI_N,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Bootstrap CI computation skipped: {e}")
             logger.info(f"Held-out TEST metrics: {state.test_metrics}")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"Test-set evaluation failed (non-critical): {e}")
@@ -210,7 +242,12 @@ class FinalizationService:
             train_df = pd.read_csv(state.train_path, low_memory=False)
             target = state.target_column
 
-            if target and target in train_df.columns:
+            # Build the SHAP frame from the same canonical feature list (by name) the
+            # model was trained on, so feature names/order line up with the estimator.
+            feats = [c for c in (state.selected_features or []) if c in train_df.columns]
+            if feats:
+                X = train_df.reindex(columns=feats).apply(pd.to_numeric, errors="coerce").fillna(0.0)
+            elif target and target in train_df.columns:
                 X = train_df.drop(columns=[target]).select_dtypes(include=[np.number])
             else:
                 X = train_df.select_dtypes(include=[np.number])
@@ -342,19 +379,35 @@ class FinalizationService:
 
         # ── Held-Out Test Performance ─────────────────────────────────────────
         if state.test_metrics:
+            cis = state.test_metric_cis or {}
             lines += [
                 "## Held-Out Test Performance",
                 "",
                 "Honest generalization estimate — the champion scored on the untouched "
                 "test split at its tuned threshold.",
                 "",
-                "| Metric | Value |",
-                "|--------|-------|",
             ]
-            for key in ("f1", "precision", "recall", "roc_auc", "pr_auc",
-                        "balanced_accuracy", "accuracy", "r2", "rmse", "mae"):
-                if key in state.test_metrics:
-                    lines.append(f"| {key.upper()} | {state.test_metrics[key]:.4f} |")
+            if cis:
+                lines += [
+                    "The **95% CI** column is a percentile bootstrap over the test rows: "
+                    "it shows how much the score could move on a different sample of the "
+                    "same size, so a single-slice number isn't read as more precise than it is.",
+                    "",
+                    "| Metric | Value | 95% CI |",
+                    "|--------|-------|--------|",
+                ]
+                for key in ("f1", "precision", "recall", "roc_auc", "pr_auc",
+                            "balanced_accuracy", "accuracy", "r2", "rmse", "mae"):
+                    if key in state.test_metrics:
+                        ci = cis.get(key)
+                        ci_txt = f"[{ci[0]:.4f}, {ci[1]:.4f}]" if ci else "—"
+                        lines.append(f"| {key.upper()} | {state.test_metrics[key]:.4f} | {ci_txt} |")
+            else:
+                lines += ["| Metric | Value |", "|--------|-------|"]
+                for key in ("f1", "precision", "recall", "roc_auc", "pr_auc",
+                            "balanced_accuracy", "accuracy", "r2", "rmse", "mae"):
+                    if key in state.test_metrics:
+                        lines.append(f"| {key.upper()} | {state.test_metrics[key]:.4f} |")
             lines.append("")
             cm = state.test_confusion
             if cm:
@@ -620,6 +673,7 @@ class FinalizationService:
 
         # Evaluation protocol — important for credibility on temporal data (fraud).
         strategy = state.data_quality_flags.get("split_strategy")
+        entity = state.data_quality_flags.get("group_aware")
         if strategy == "out-of-time":
             lines += [
                 "**Out-of-time evaluation.** A time axis was detected, so the data was split "
@@ -630,10 +684,25 @@ class FinalizationService:
                 "estimate of how the model performs on tomorrow's data.",
                 "",
             ]
+        elif strategy == "group-aware":
+            lines += [
+                f"**Group-aware evaluation.** Rows were grouped by `{entity}` so that every "
+                f"{entity} appears in only one of train/validation/test. This prevents identity "
+                "leakage — the model can't 'recognise' an entity it already memorised — while "
+                "preserving class balance across the splits.",
+                "",
+            ]
         elif strategy == "stratified-random":
             lines += [
                 "**Stratified-random evaluation.** No usable time axis was found, so the data was split "
                 "randomly while preserving the class balance across train/validation/test.",
+                "",
+            ]
+        if entity and strategy == "out-of-time":
+            lines += [
+                f"The split is also **group-aware**: every `{entity}` is confined to a single split, "
+                "so no entity straddles train and test — closing the identity-leakage gap that a plain "
+                "chronological split leaves open.",
                 "",
             ]
 

@@ -205,6 +205,21 @@ AXIOM_SPLIT_TIME_COL: str = "__axiom_split_time__"
 # hidden key, e.g. creditcard's numeric "Time" column that survives as a feature).
 TIME_COLUMN_NAME_PATTERN: str = r"(?i)(^|_)(time|date|datetime|timestamp|epoch|step)($|_)"
 
+# Group-aware (entity) splitting. In transactional/fraud data the SAME entity
+# (card, user, account) recurs across many rows; if its rows land in both train
+# and test the model can memorise the entity rather than learn the pattern —
+# identity leakage that inflates offline metrics. When an entity column is
+# detected, feature engineering threads its values to the splitter via this hidden
+# key so an entity can be kept entirely within one split; the splitter drops it
+# before saving so it never becomes a feature.
+AXIOM_SPLIT_GROUP_COL: str = "__axiom_split_group__"
+# Column names (lowercased, exact match) treated as an entity/group key. Kept in
+# sync with the per-entity velocity features in feature engineering.
+ENTITY_GROUP_COLUMN_NAMES: tuple[str, ...] = (
+    "cc_num", "card_num", "card_number", "card", "user_id", "cardholder_id",
+    "account_id", "customer_id", "client_id",
+)
+
 # Data loading
 DEFAULT_CHUNK_SIZE: int = 50_000
 DEFAULT_MAX_COLUMNS: int = 500

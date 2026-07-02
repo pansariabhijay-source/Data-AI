@@ -132,6 +132,10 @@ class PipelineState(BaseModel):
     # Honest held-out test-set evaluation of the champion model (computed once,
     # at the chosen decision threshold). Empty until the test split is scored.
     test_metrics: dict[str, float] = Field(default_factory=dict)
+    # 95% bootstrap confidence interval [low, high] per test metric — conveys how
+    # much the single-slice test score could vary, so a point estimate isn't read
+    # as more precise than it is.
+    test_metric_cis: dict[str, list[float]] = Field(default_factory=dict)
     test_confusion: dict[str, int] = Field(default_factory=dict)
     # Precision/recall at fixed alert rates on the test set (binary classification),
     # for choosing an operating point given review capacity (fraud use case).

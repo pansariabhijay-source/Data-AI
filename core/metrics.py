@@ -15,11 +15,27 @@ from core.logging_config import get_logger
 logger = get_logger("metrics")
 
 
+def target_inverse_transform(data_quality_flags: Optional[dict]) -> Optional[Any]:
+    """Return the callable mapping model-space regression predictions back to the
+    target's ORIGINAL units, or ``None`` if the target was not transformed.
+
+    Feature engineering log1p-transforms a heavily skewed regression target and
+    records it under ``data_quality_flags["log_transformed_target"]``. The model
+    then trains and predicts in log-space; ``np.expm1`` is the exact inverse used
+    to report metrics (and, later, predictions) in the units the user cares about.
+    """
+    info = (data_quality_flags or {}).get("log_transformed_target")
+    if info:
+        return np.expm1
+    return None
+
+
 def compute_metrics(
     y_true: np.ndarray,
     y_pred: np.ndarray,
     problem_type: ProblemType,
     y_prob: Optional[np.ndarray] = None,
+    inverse_transform: Optional[Any] = None,
 ) -> dict[str, float]:
     """Compute all relevant metrics for the given problem type.
 
@@ -28,6 +44,13 @@ def compute_metrics(
         y_pred: Predicted labels/values.
         problem_type: The ML problem type.
         y_prob: Predicted probabilities (classification only).
+        inverse_transform: Optional callable applied to BOTH ``y_true`` and
+            ``y_pred`` before scoring a regression problem. When the pipeline
+            log-transforms a skewed target, the model trains/predicts in
+            log-space; passing ``np.expm1`` here makes the reported RMSE/MAE/R²
+            reflect the target's ORIGINAL units (dollars, counts, …) instead of
+            log-space, which is otherwise meaningless to a user. Ignored for
+            classification/clustering.
 
     Returns:
         Dict mapping metric name to value.
@@ -35,7 +58,7 @@ def compute_metrics(
     if problem_type == ProblemType.CLASSIFICATION:
         return _classification_metrics(y_true, y_pred, y_prob)
     elif problem_type == ProblemType.REGRESSION:
-        return _regression_metrics(y_true, y_pred)
+        return _regression_metrics(y_true, y_pred, inverse_transform)
     elif problem_type == ProblemType.CLUSTERING:
         return _clustering_metrics(y_true, y_pred)
     else:
@@ -89,8 +112,29 @@ def confusion_counts(y_true: np.ndarray, y_pred: np.ndarray) -> Optional[dict[st
     return {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)}
 
 
-def _regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+def _regression_metrics(
+    y_true: np.ndarray, y_pred: np.ndarray, inverse_transform: Optional[Any] = None
+) -> dict[str, float]:
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    # Report in the target's original units when it was transformed for training
+    # (e.g. log1p on a skewed target). RMSE/MAE are only meaningful in real units,
+    # and R² differs between log- and original-space, so scoring the inverse-mapped
+    # values is the honest number to show the user. Guard against overflow/NaN from
+    # expm1 on extreme predictions by falling back to the raw (log-space) values.
+    if inverse_transform is not None:
+        try:
+            with np.errstate(over="ignore", invalid="ignore"):
+                yt = inverse_transform(y_true)
+                yp = inverse_transform(y_pred)
+            if np.all(np.isfinite(yt)) and np.all(np.isfinite(yp)):
+                y_true, y_pred = yt, yp
+            else:
+                logger.warning("inverse_transform produced non-finite values; "
+                               "reporting regression metrics in transformed space")
+        except Exception as e:
+            logger.warning(f"inverse_transform failed ({e}); metrics in transformed space")
     return {
         "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
         "mae": float(mean_absolute_error(y_true, y_pred)),
@@ -235,6 +279,69 @@ def operating_points(
             "caught": caught,
             "total_fraud": total_pos,
         })
+    return out
+
+
+def bootstrap_metric_cis(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    problem_type: ProblemType,
+    y_prob: Optional[np.ndarray] = None,
+    inverse_transform: Optional[Any] = None,
+    metrics: tuple[str, ...] = (
+        "f1", "pr_auc", "roc_auc", "precision", "recall", "r2", "rmse", "mae",
+    ),
+    n_boot: int = 500,
+    alpha: float = 0.05,
+    seed: int = 42,
+    max_rows: int = 50000,
+) -> dict[str, list[float]]:
+    """Percentile bootstrap confidence intervals for held-out test metrics.
+
+    A single test slice gives a point estimate with no sense of its uncertainty —
+    "PR-AUC 0.78" reads as precise when it may be 0.78 ± 0.05. Resampling the test
+    rows with replacement and recomputing each metric yields an honest
+    ``[low, high]`` interval at confidence ``1 - alpha`` (default 95%).
+
+    Returns ``{metric: [low, high]}`` for the metrics that are computable; empty
+    when the test set is too small. Cost is bounded by capping rows and resamples.
+    """
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    n = len(y_true)
+    if n < 20 or n_boot <= 0:
+        return {}
+    yprob = np.asarray(y_prob) if y_prob is not None else None
+
+    rng = np.random.default_rng(seed)
+    if n > max_rows:
+        base = rng.choice(n, size=max_rows, replace=False)
+        y_true, y_pred = y_true[base], y_pred[base]
+        if yprob is not None:
+            yprob = yprob[base]
+        n = max_rows
+
+    samples: dict[str, list[float]] = {m: [] for m in metrics}
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, n)
+        yp = yprob[idx] if yprob is not None else None
+        m = compute_metrics(
+            y_true[idx], y_pred[idx], problem_type, yp, inverse_transform=inverse_transform
+        )
+        for k in metrics:
+            v = m.get(k)
+            if v is not None and np.isfinite(v):
+                samples[k].append(float(v))
+
+    lo_p, hi_p = 100.0 * alpha / 2.0, 100.0 * (1.0 - alpha / 2.0)
+    out: dict[str, list[float]] = {}
+    min_valid = max(30, n_boot // 10)
+    for k, vals in samples.items():
+        if len(vals) >= min_valid:
+            out[k] = [
+                round(float(np.percentile(vals, lo_p)), 4),
+                round(float(np.percentile(vals, hi_p)), 4),
+            ]
     return out
 
 

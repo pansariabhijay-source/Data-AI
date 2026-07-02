@@ -27,10 +27,11 @@ from core.metrics import (
     is_metric_higher_better,
     predict_with_optimal_threshold,
     selection_score,
+    target_inverse_transform,
 )
 from core.model_registry import apply_imbalance_handling, build_default_registry
 from core.state import ErrorReport, ExperimentRecord, ModelResult, PipelineState
-from core.utils import ensure_directory
+from core.utils import build_model_matrix, ensure_directory
 
 logger = get_logger("improvement")
 
@@ -57,7 +58,7 @@ class ImprovementService:
 
     def _tune_with_randomized_search(
         self, model_name: str, X_train: np.ndarray, y_train: np.ndarray,
-        problem_type: ProblemType, seed: int,
+        problem_type: ProblemType, seed: int, time_ordered: bool = False,
     ) -> tuple[Any, dict[str, Any]]:
         """Tune a model using RandomizedSearchCV."""
         from sklearn.model_selection import RandomizedSearchCV
@@ -87,9 +88,17 @@ class ImprovementService:
             return model, spec.default_params
 
         n_iter = min(self._config.tuning_iterations, _count_combinations(spec.search_space))
-        # Stratified folds keep the minority class represented in every split —
-        # essential for stable tuning on imbalanced targets.
-        if binary or (problem_type == ProblemType.CLASSIFICATION):
+        # Choose the cross-validation scheme to MATCH how the run was evaluated:
+        #   • out-of-time run → forward-chaining TimeSeriesSplit (no shuffle), so
+        #     tuning never scores a model on data older than what it trained on —
+        #     otherwise we'd leak the future into hyperparameter selection and undo
+        #     the whole point of the chronological split.
+        #   • otherwise → StratifiedKFold (keeps the minority class in every fold,
+        #     essential for stable tuning on imbalanced targets).
+        if time_ordered:
+            from sklearn.model_selection import TimeSeriesSplit
+            cv = TimeSeriesSplit(n_splits=5)
+        elif binary or (problem_type == ProblemType.CLASSIFICATION):
             from sklearn.model_selection import StratifiedKFold
             cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
         else:
@@ -165,7 +174,8 @@ class ImprovementService:
     def _run_one_tuning_round(
         self, model_name: str, X_train: np.ndarray, y_train: np.ndarray,
         X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
-        n_classes: int, seed: int,
+        n_classes: int, seed: int, time_ordered: bool = False,
+        target_inverse: Optional[Any] = None,
     ) -> Optional[dict[str, Any]]:
         """Tune ``model_name`` once and score it on the validation split.
 
@@ -188,7 +198,9 @@ class ImprovementService:
         if self._config.use_optuna:
             tuned, params = self._try_optuna(model_name, X_train, y_train, X_val, y_val, problem_type, seed)
         else:
-            tuned, params = self._tune_with_randomized_search(model_name, X_train, y_train, problem_type, seed)
+            tuned, params = self._tune_with_randomized_search(
+                model_name, X_train, y_train, problem_type, seed, time_ordered=time_ordered
+            )
         if tuned is None:
             return None
 
@@ -205,7 +217,8 @@ class ImprovementService:
         else:
             preds = tuned.predict(X_val)
 
-        metrics = compute_metrics(y_val, preds, problem_type, y_prob)
+        metrics = compute_metrics(y_val, preds, problem_type, y_prob,
+                                  inverse_transform=target_inverse)
         return {
             "model": tuned, "params": params, "metrics": metrics,
             "threshold": threshold, "score": selection_score(metrics, problem_type, n_classes),
@@ -225,15 +238,15 @@ class ImprovementService:
             state.mark_stage_end("improvement")
             return state
 
-        # Load data
+        # Load data — select the model matrix by name for exact train/val alignment.
         train_df = pd.read_csv(state.train_path, low_memory=False)
-        X_train = train_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+        X_train, _ = build_model_matrix(train_df, target, state.selected_features)
         y_train = train_df[target].values
 
         X_val, y_val = X_train, y_train
         if state.val_path:
             val_df = pd.read_csv(state.val_path, low_memory=False)
-            X_val = val_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+            X_val, _ = build_model_matrix(val_df, target, state.selected_features)
             y_val = val_df[target].values
 
         # Find best model to tune
@@ -245,6 +258,12 @@ class ImprovementService:
         artifact_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id / "models")
         primary = get_primary_metric(problem_type)
         n_classes = int(len(np.unique(y_train)))
+
+        # Match the run's evaluation protocol during tuning: out-of-time runs get
+        # forward-chaining CV (no future leak); log-transformed regression targets
+        # are scored back in original units so tuned-vs-champion is apples-to-apples.
+        time_ordered = state.data_quality_flags.get("split_strategy") == "out-of-time"
+        target_inverse = target_inverse_transform(state.data_quality_flags)
 
         improvements: list[str] = []
 
@@ -280,6 +299,7 @@ class ImprovementService:
                 cand = self._run_one_tuning_round(
                     tune_model, X_train, y_train, X_val, y_val, problem_type, n_classes,
                     seed=self._seed + 1 + i,
+                    time_ordered=time_ordered, target_inverse=target_inverse,
                 )
                 if cand is None:
                     improvements.append(

@@ -80,14 +80,21 @@ def detect_target_leakage(
 ) -> list[str]:
     """Detect features that almost perfectly determine the target (potential leakage).
 
-    Two complementary, high-precision signals so the check is robust to the target's
-    dtype (the old correlation-only check silently did nothing for a string target):
+    Three complementary, high-precision signals so the check is robust to the
+    dtype of BOTH the target and the feature:
 
     * **Regression / numeric target** — absolute Pearson correlation ``>= threshold``.
-    * **Binary classification target** — single-feature ROC-AUC ``>= auc_threshold``.
+    * **Binary target, numeric feature** — single-feature ROC-AUC ``>= auc_threshold``.
       Correlation misses thresholded leakage (e.g. ``RainTomorrow`` derived from a
       ``RISK_MM`` rainfall column has only ~0.69 corr but a perfect 1.0 AUC), whereas
       a feature that ranks the target perfectly on its own is leakage by definition.
+    * **Binary target, categorical (string) feature** — out-of-fold target-encoded
+      ROC-AUC ``>= auc_threshold``. The numeric-AUC path coerces each feature with
+      ``to_numeric`` first, so a pure-string column that perfectly predicts the
+      target (e.g. a ``status``/``disposition`` text field) became all-NaN and was
+      silently skipped. Out-of-fold encoding catches it while self-guarding against
+      false positives on high-cardinality ID columns: their categories are unseen
+      across folds, so they collapse to the global mean and carry no AUC signal.
 
     Thresholds are deliberately near-1 to avoid stripping legitimately strong
     predictors. ID-like columns are left to the feature-engineering ID guard.
@@ -124,25 +131,95 @@ def detect_target_leakage(
         return leaked
 
     y_enc = pd.factorize(y)[0]  # 0/1 encoding of the two classes
+    n_rows = len(df)
     for col in df.columns:
         if col == target:
             continue
         feat = pd.to_numeric(df[col], errors="coerce")
-        mask = feat.notna() & (y_enc >= 0)
-        if mask.sum() < 10:
-            continue
-        yv = y_enc[mask.to_numpy()]
-        if len(np.unique(yv)) < 2:
-            continue
-        try:
-            auc = roc_auc_score(yv, feat[mask])
-            auc = max(auc, 1.0 - auc)  # direction-agnostic ranking power
-            if auc >= auc_threshold:
+        numeric_frac = float(feat.notna().mean())
+        if numeric_frac >= 0.5:
+            # Numeric (or mostly-numeric) feature — direct single-feature AUC.
+            mask = feat.notna() & (y_enc >= 0)
+            if mask.sum() < 10:
+                continue
+            yv = y_enc[mask.to_numpy()]
+            if len(np.unique(yv)) < 2:
+                continue
+            try:
+                auc = roc_auc_score(yv, feat[mask])
+                auc = max(auc, 1.0 - auc)  # direction-agnostic ranking power
+                if auc >= auc_threshold:
+                    leaked.append(col)
+                    logger.warning(f"Potential leakage: '{col}' has single-feature AUC {auc:.4f} vs target")
+            except Exception:
+                continue
+        else:
+            # Categorical / string feature — out-of-fold target-encoded AUC.
+            nunique = int(df[col].nunique(dropna=True))
+            # Guard: need >= 2 categories, and skip near-unique ID-like columns
+            # (they carry no generalizable signal and are handled by the FE ID guard).
+            if nunique < 2 or (n_rows and nunique / n_rows > 0.5):
+                continue
+            auc = _categorical_leakage_auc(df[col], y_enc)
+            if auc is not None and auc >= auc_threshold:
                 leaked.append(col)
-                logger.warning(f"Potential leakage: '{col}' has single-feature AUC {auc:.4f} vs target")
-        except Exception:
-            continue
+                logger.warning(
+                    f"Potential leakage: categorical '{col}' has out-of-fold "
+                    f"target-encoded AUC {auc:.4f} vs target"
+                )
     return leaked
+
+
+def _categorical_leakage_auc(
+    col: pd.Series, y_enc: np.ndarray, n_splits: int = 5, seed: int = 42,
+    max_rows: int = 20000,
+) -> Optional[float]:
+    """Direction-agnostic out-of-fold target-encoded ROC-AUC of a categorical
+    feature against a binary target, or ``None`` if it can't be computed.
+
+    Out-of-fold (K-fold) target-mean encoding is what makes this a *leakage* test
+    rather than a memorization test: within-sample target encoding trivially
+    "predicts" the target for any high-cardinality column, but encoding each fold
+    from the OTHER folds' means means an ID-like column (categories unseen across
+    folds) collapses to the global mean and scores ~0.5, while a genuinely leaky
+    low-cardinality column still separates the classes almost perfectly.
+    """
+    from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import StratifiedKFold
+
+    cats = col.astype("string").fillna("__nan__").astype(str).to_numpy()
+    y_enc = np.asarray(y_enc)
+    n = len(cats)
+    if n != len(y_enc) or n < 20:
+        return None
+
+    # Bound cost on large data — leakage is near-perfect, so a stratified sample
+    # detects it just as well as the full frame.
+    if n > max_rows:
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(n, size=max_rows, replace=False)
+        cats, y_enc = cats[idx], y_enc[idx]
+        n = max_rows
+
+    if len(np.unique(y_enc)) < 2:
+        return None
+    _, counts = np.unique(y_enc, return_counts=True)
+    folds = int(min(n_splits, counts.min()))
+    if folds < 2:
+        return None
+
+    global_mean = float(np.mean(y_enc))
+    oof = np.full(n, global_mean, dtype=float)
+    try:
+        skf = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
+        for tr, va in skf.split(np.zeros(n), y_enc):
+            means = pd.Series(y_enc[tr]).groupby(cats[tr]).mean()
+            mapped = pd.Series(cats[va]).map(means)
+            oof[va] = mapped.fillna(global_mean).to_numpy()
+        auc = roc_auc_score(y_enc, oof)
+        return float(max(auc, 1.0 - auc))
+    except Exception:
+        return None
 
 
 def detect_class_imbalance(
