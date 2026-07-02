@@ -54,41 +54,85 @@ class DataSplittingService:
         val_ratio = self._config.val_ratio
         test_ratio = self._config.test_ratio
 
-        # Decide between out-of-time (chronological) and stratified-random splitting.
+        # Decide the split strategy. Precedence (each guarded by class-completeness):
+        #   1. grouped out-of-time  — entity + time: whole entities, oldest→newest
+        #   2. out-of-time          — time only: chronological
+        #   3. group-aware          — entity only: whole entities, stratified
+        #   4. stratified-random    — fallback
+        from core.constants import AXIOM_SPLIT_GROUP_COL
         time_col = self._detect_time_column(df, target) if self._config.time_aware_split != "off" else None
         if self._config.time_aware_split == "on" and time_col is None:
             logger.warning("time_aware_split='on' but no usable time column found — using stratified random")
+        group_col = (
+            AXIOM_SPLIT_GROUP_COL
+            if (self._config.group_aware_split != "off" and AXIOM_SPLIT_GROUP_COL in df.columns)
+            else None
+        )
+        entity_name = state.data_quality_flags.get("entity_column", "entity")
+
+        def _class_ok(parts) -> bool:
+            if problem_type != ProblemType.CLASSIFICATION:
+                return all(p is not None and len(p) > 0 for p in parts)
+            nc = df[target].nunique()
+            return all(p is not None and len(p) > 0 and p[target].nunique() >= nc for p in parts)
 
         train = val = test = None
         strategy = "stratified-random"
-        if time_col is not None:
-            train, val, test = self._chronological_split(df, time_col, train_ratio, val_ratio, test_ratio)
-            # Guard: a chronological slice can be degenerate on imbalanced data (e.g.
-            # the newest period contains no fraud). If any split loses a class, the
-            # out-of-time split is unusable — fall back to a stratified random split.
-            if problem_type == ProblemType.CLASSIFICATION:
-                n_classes = df[target].nunique()
-                if any(part[target].nunique() < n_classes for part in (train, val, test)):
-                    logger.warning(
-                        "Out-of-time split produced a class-incomplete fold "
-                        "(rare class concentrated in time) — falling back to stratified random."
-                    )
-                    train = None
-            if train is not None:
+
+        # 1) Grouped out-of-time — no entity straddles the boundary AND train is the past.
+        if group_col is not None and time_col is not None:
+            parts = self._grouped_chronological_split(
+                df, time_col, group_col, train_ratio, val_ratio, test_ratio
+            )
+            if parts is not None and _class_ok(parts):
+                train, val, test = parts
+                strategy = "out-of-time"
+                state.data_quality_flags["group_aware"] = entity_name
+                logger.info(
+                    f"Grouped out-of-time split on '{entity_name}'+time: "
+                    f"train(oldest)={len(train)}, val={len(val)}, test(newest)={len(test)}"
+                )
+
+        # 2) Pure out-of-time — time axis, no usable entity grouping.
+        if train is None and time_col is not None:
+            parts = self._chronological_split(df, time_col, train_ratio, val_ratio, test_ratio)
+            if _class_ok(parts):
+                train, val, test = parts
                 strategy = "out-of-time"
                 logger.info(f"Out-of-time split on '{time_col}': train(oldest)={len(train)}, val={len(val)}, test(newest)={len(test)}")
+            else:
+                logger.warning(
+                    "Out-of-time split produced a class-incomplete fold "
+                    "(rare class concentrated in time) — trying group-aware / stratified."
+                )
 
+        # 3) Group-aware (non-temporal) — keep each entity within one split.
+        if train is None and group_col is not None:
+            parts = self._group_aware_split(
+                df, target, group_col, problem_type, train_ratio, val_ratio, test_ratio
+            )
+            if parts is not None and _class_ok(parts):
+                train, val, test = parts
+                strategy = "group-aware"
+                state.data_quality_flags["group_aware"] = entity_name
+                logger.info(
+                    f"Group-aware split on '{entity_name}': "
+                    f"train={len(train)}, val={len(val)}, test={len(test)}"
+                )
+
+        # 4) Fallback: stratified random.
         if train is None:
             train, val, test = self._random_split(df, target, problem_type, train_ratio, val_ratio, test_ratio)
             strategy = "stratified-random"
             logger.info(f"Stratified-random split: train={len(train)}, val={len(val)}, test={len(test)}")
 
-        # CRITICAL: drop the hidden split-time key so it never becomes a model
-        # feature (it would be a perfect proxy for the chronological label boundary).
+        # CRITICAL: drop the hidden split keys so they never become model features
+        # (the time key proxies the label boundary; the group key proxies identity).
         from core.constants import AXIOM_SPLIT_TIME_COL
-        train = train.drop(columns=[AXIOM_SPLIT_TIME_COL], errors="ignore")
-        val = val.drop(columns=[AXIOM_SPLIT_TIME_COL], errors="ignore")
-        test = test.drop(columns=[AXIOM_SPLIT_TIME_COL], errors="ignore")
+        _hidden = [AXIOM_SPLIT_TIME_COL, AXIOM_SPLIT_GROUP_COL]
+        train = train.drop(columns=_hidden, errors="ignore")
+        val = val.drop(columns=_hidden, errors="ignore")
+        test = test.drop(columns=_hidden, errors="ignore")
 
         # Save splits
         artifact_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id)
@@ -151,6 +195,90 @@ class DataSplittingService:
         i_train = int(round(n * train_ratio))
         i_val = int(round(n * (train_ratio + val_ratio)))
         return ordered.iloc[:i_train], ordered.iloc[i_train:i_val], ordered.iloc[i_val:]
+
+    def _grouped_chronological_split(self, df, time_col, group_col, train_ratio, val_ratio, test_ratio):
+        """Out-of-time split at ENTITY granularity: order entities by first-seen time,
+        assign whole entities oldest→train / newest→test, then sort each split by time.
+
+        This prevents BOTH future leakage (train is the past) and identity leakage
+        (an entity's rows never straddle the boundary). Returns ``None`` if the
+        result would be degenerate (any split empty), so the caller can fall back.
+        """
+        try:
+            first_seen = df.groupby(group_col)[time_col].min().sort_values(kind="mergesort")
+            sizes = df.groupby(group_col).size()
+            n = len(df)
+            i_train, i_val = n * train_ratio, n * (train_ratio + val_ratio)
+            assign: dict = {}
+            cum = 0
+            for g in first_seen.index:
+                if cum < i_train:
+                    assign[g] = "train"
+                elif cum < i_val:
+                    assign[g] = "val"
+                else:
+                    assign[g] = "test"
+                cum += int(sizes[g])
+            bucket = df[group_col].map(assign)
+            # Sort each split by time so the rows remain chronological (keeps the
+            # out-of-time guarantee and makes downstream time-aware CV valid).
+            parts = tuple(
+                df[bucket == name].sort_values(time_col, kind="mergesort")
+                for name in ("train", "val", "test")
+            )
+            if any(len(p) == 0 for p in parts):
+                return None
+            return parts
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Grouped out-of-time split failed ({e}); will fall back")
+            return None
+
+    def _group_aware_split(self, df, target, group_col, problem_type, train_ratio, val_ratio, test_ratio):
+        """Non-temporal split that keeps each entity entirely within one split.
+
+        Classification uses StratifiedGroupKFold (preserves class balance AND group
+        integrity); regression uses GroupShuffleSplit. Returns ``None`` on any
+        failure (e.g. too few groups for the requested folds) so the caller falls
+        back to a stratified-random split.
+        """
+        import numpy as np
+
+        groups = df[group_col].to_numpy()
+        n = len(df)
+        pos = np.arange(n)
+        try:
+            if problem_type == ProblemType.CLASSIFICATION:
+                from sklearn.model_selection import StratifiedGroupKFold
+                y = df[target].to_numpy()
+                n_test = max(2, int(round(1.0 / test_ratio)))
+                sgkf = StratifiedGroupKFold(n_splits=n_test, shuffle=True, random_state=self._seed)
+                trval_pos, test_pos = next(sgkf.split(pos, y, groups))
+                val_frac = val_ratio / (train_ratio + val_ratio)
+                n_val = max(2, int(round(1.0 / val_frac)))
+                sgkf2 = StratifiedGroupKFold(n_splits=n_val, shuffle=True, random_state=self._seed)
+                sub_tr, sub_val = next(sgkf2.split(trval_pos, y[trval_pos], groups[trval_pos]))
+                train_pos, val_pos = trval_pos[sub_tr], trval_pos[sub_val]
+            else:
+                from sklearn.model_selection import GroupShuffleSplit
+                gss = GroupShuffleSplit(n_splits=1, test_size=test_ratio, random_state=self._seed)
+                trval_pos, test_pos = next(gss.split(pos, groups=groups))
+                val_frac = val_ratio / (train_ratio + val_ratio)
+                gss2 = GroupShuffleSplit(n_splits=1, test_size=val_frac, random_state=self._seed)
+                sub_tr, sub_val = next(gss2.split(trval_pos, groups=groups[trval_pos]))
+                train_pos, val_pos = trval_pos[sub_tr], trval_pos[sub_val]
+
+            parts = (df.iloc[train_pos], df.iloc[val_pos], df.iloc[test_pos])
+            if any(len(p) == 0 for p in parts):
+                return None
+            # Sanity: no entity may appear in more than one split.
+            s_tr, s_val, s_te = (set(df[group_col].iloc[p]) for p in (train_pos, val_pos, test_pos))
+            if (s_tr & s_val) or (s_tr & s_te) or (s_val & s_te):
+                logger.warning("Group-aware split leaked an entity across folds; falling back")
+                return None
+            return parts
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Group-aware split failed ({e}); will fall back")
+            return None
 
     def _random_split(self, df, target, problem_type, train_ratio, val_ratio, test_ratio):
         from sklearn.model_selection import train_test_split

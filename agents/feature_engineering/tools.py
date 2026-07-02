@@ -40,6 +40,30 @@ class FeatureEngineeringService:
     def __init__(self, config: FeatureEngineeringConfig) -> None:
         self._config = config
 
+    def _capture_split_group(self, df: pd.DataFrame, target: Optional[str]) -> Optional[pd.Series]:
+        """Return the entity/group column's values (as strings) to thread to the
+        splitter, or None if no entity column is present.
+
+        Detected by exact (lowercased) name match against ``ENTITY_GROUP_COLUMN_NAMES``
+        — the same list used for per-entity velocity features — and only when the
+        column actually repeats (nunique < n_rows), since a fully-unique column is a
+        plain row id, not a recurring entity worth grouping on.
+        """
+        from core.constants import ENTITY_GROUP_COLUMN_NAMES
+        self._split_group_name = None
+        n = len(df)
+        for c in df.columns:
+            if c == target or c.lower() not in ENTITY_GROUP_COLUMN_NAMES:
+                continue
+            try:
+                if df[c].nunique(dropna=True) < n:  # must recur to be a group
+                    logger.info(f"Detected entity/group column '{c}' for group-aware splitting")
+                    self._split_group_name = c
+                    return df[c].astype(str)
+            except Exception:
+                continue
+        return None
+
     def drop_numeric_id_columns(self, df: pd.DataFrame, target: Optional[str] = None) -> tuple[pd.DataFrame, dict[str, str]]:
         """Drop numeric columns that are ID-like (e.g. User_ID, transaction_id as int).
 
@@ -408,22 +432,117 @@ class FeatureEngineeringService:
             card_col = card_cols[0]
             amt_col  = amt_cols[0]
             try:
-                grp = df.groupby(card_col)[amt_col]
-                df["card_tx_count"]    = grp.transform("count").astype(np.float32)
-                df["card_amt_mean"]    = grp.transform("mean").astype(np.float32)
-                df["card_amt_std"]     = grp.transform("std").fillna(0).astype(np.float32)
-                df["card_amt_max"]     = grp.transform("max").astype(np.float32)
-                # Z-score: how unusual is this transaction for this cardholder?
-                std = df["card_amt_std"].replace(0, np.nan)
-                df["card_amt_zscore"]  = ((df[amt_col] - df["card_amt_mean"]) / std).fillna(0).clip(-5, 5).astype(np.float32)
-                new_cols = ["card_tx_count", "card_amt_mean", "card_amt_std",
-                            "card_amt_max", "card_amt_zscore"]
+                time_order = self._entity_time_order(df)
+                if time_order is not None:
+                    # Time-safe: each row sees only its own PAST transactions for this
+                    # card (expanding stats over prior rows in time order). Whole-dataset
+                    # groupby stats leak the future — a card's mean/max/count would
+                    # include transactions that haven't happened yet at prediction time.
+                    feats = self._time_safe_entity_aggregates(df, card_col, amt_col, time_order)
+                    for name, series in feats.items():
+                        df[name] = series
+                    new_cols = list(feats.keys())
+                    logger.info(
+                        f"Added {len(new_cols)} time-safe per-{card_col} velocity features "
+                        "(expanding over each card's past only)"
+                    )
+                else:
+                    # No time axis → no causal ordering to expand over; fall back to
+                    # whole-card stats (fine for a random split, where there's no
+                    # temporal generalization claim to protect).
+                    grp = df.groupby(card_col)[amt_col]
+                    df["card_tx_count"]    = grp.transform("count").astype(np.float32)
+                    df["card_amt_mean"]    = grp.transform("mean").astype(np.float32)
+                    df["card_amt_std"]     = grp.transform("std").fillna(0).astype(np.float32)
+                    df["card_amt_max"]     = grp.transform("max").astype(np.float32)
+                    std = df["card_amt_std"].replace(0, np.nan)
+                    df["card_amt_zscore"]  = ((df[amt_col] - df["card_amt_mean"]) / std).fillna(0).clip(-5, 5).astype(np.float32)
+                    new_cols = ["card_tx_count", "card_amt_mean", "card_amt_std",
+                                "card_amt_max", "card_amt_zscore"]
+                    logger.info(f"Added {len(new_cols)} per-{card_col} velocity features (no time axis; whole-card stats)")
                 created.extend(new_cols)
-                logger.info(f"Added {len(new_cols)} per-cardholder velocity features from '{card_col}'")
             except Exception as e:
                 logger.warning(f"Velocity features failed: {e}")
 
         return df, created
+
+    def _entity_time_order(self, df: pd.DataFrame) -> Optional[pd.Series]:
+        """Return a numeric time-ordering key aligned to ``df.index`` for causal
+        per-entity aggregates, or None if no usable time axis exists.
+
+        Prefers the primary timestamp captured from a parsed datetime column
+        (``self._split_time``); otherwise a raw numeric time-like column (e.g.
+        creditcard's ``Time``, ``unix_time``) identified by name + spread.
+        """
+        import re
+        from core.constants import TIME_COLUMN_NAME_PATTERN
+
+        st = getattr(self, "_split_time", None)
+        if st is not None:
+            try:
+                if st.notna().mean() > 0.5:
+                    return st.reindex(df.index)
+            except Exception:
+                pass
+        pat = re.compile(TIME_COLUMN_NAME_PATTERN)
+        decomposed = ("_year", "_month", "_dow", "_hour", "_sin", "_cos",
+                      "_is_weekend", "_recency_days", "_was_missing")
+        best, best_card = None, 0
+        n = max(len(df), 1)
+        for c in df.columns:
+            if not pat.search(c) or c.endswith(decomposed):
+                continue
+            s = df[c]
+            if not pd.api.types.is_numeric_dtype(s) or s.notna().mean() < 0.9:
+                continue
+            card = s.nunique()
+            if card > max(20, 0.05 * n) and card > best_card:
+                best, best_card = c, card
+        return df[best].astype(float) if best is not None else None
+
+    @staticmethod
+    def _time_safe_entity_aggregates(
+        df: pd.DataFrame, entity_col: str, amt_col: str, time_order: pd.Series,
+    ) -> dict[str, "pd.Series"]:
+        """Causal per-entity aggregates: for each row, stats over that entity's rows
+        strictly BEFORE it in time (expanding window, current row excluded).
+
+        Vectorised via grouped cumulative sums (O(n)); the first transaction per
+        entity has no past, so mean/std/max default to neutral values and count=0.
+        Returned Series are aligned to the original ``df.index``.
+        """
+        tmp = pd.DataFrame({
+            "g": df[entity_col].to_numpy(),
+            "a": pd.to_numeric(df[amt_col], errors="coerce").to_numpy(dtype=float),
+            "t": pd.to_numeric(time_order, errors="coerce").to_numpy(dtype=float),
+        }, index=df.index)
+        # Stable sort by time so "expanding" means "past" within each entity.
+        tmp = tmp.sort_values("t", kind="mergesort")
+        g = tmp.groupby("g", sort=False)["a"]
+
+        count_past = g.cumcount().astype(float)                 # # of prior txns
+        sum_incl = g.cumsum()
+        sum_past = sum_incl - tmp["a"]                          # exclude current
+        a2 = tmp["a"] ** 2
+        sum2_incl = a2.groupby(tmp["g"], sort=False).cumsum()
+        sum2_past = sum2_incl - a2
+        cummax_excl = g.cummax().groupby(tmp["g"], sort=False).shift()
+
+        has_past = count_past > 0
+        mean_past = (sum_past / count_past).where(has_past)
+        var_past = (sum2_past / count_past - mean_past ** 2).where(has_past)
+        std_past = np.sqrt(var_past.clip(lower=0))
+        zscore = ((tmp["a"] - mean_past) / std_past.replace(0, np.nan))
+
+        out = {
+            "card_tx_count": count_past,
+            "card_amt_mean": mean_past.fillna(0.0),
+            "card_amt_std": std_past.fillna(0.0),
+            "card_amt_max": cummax_excl.fillna(0.0),
+            "card_amt_zscore": zscore.fillna(0.0).clip(-5, 5),
+        }
+        # Realign to original row order and cast compactly.
+        return {k: v.reindex(df.index).astype(np.float32) for k, v in out.items()}
 
     def generate_interactions(self, df: pd.DataFrame, target: Optional[str], importances: dict[str, float], top_n: int = 6) -> tuple[pd.DataFrame, list[str]]:
         """Generate pairwise multiplicative interactions for the top-N features.
@@ -523,6 +642,14 @@ class FeatureEngineeringService:
         problem_type = ProblemType(state.problem_type) if state.problem_type else ProblemType.UNKNOWN
         self._split_time = None  # reset per run; captured in extract_datetime_features
 
+        # Capture the entity/group key (card/user/account) BEFORE any ID column is
+        # dropped or encoded, so the splitter can keep an entity entirely within one
+        # split (prevents identity leakage). Threaded via a hidden column, like the
+        # split-time key; excluded from the model features and dropped before saving.
+        self._split_group = self._capture_split_group(df, target)
+        if self._split_group is not None and getattr(self, "_split_group_name", None):
+            state.data_quality_flags["entity_column"] = self._split_group_name
+
         # Act on leakage detected during data collection: a feature that is ~perfectly
         # correlated with the target leaks the answer, inflating training metrics while
         # the model fails to generalize. Detection without removal is a silent trap.
@@ -550,12 +677,18 @@ class FeatureEngineeringService:
                     df[target] = np.log1p(df[target])
                     state.data_quality_flags["log_transformed_target"] = {
                         "column": target,
+                        "transform": "log1p",
+                        "inverse": "expm1",
                         "original_skew": round(float(tgt.skew()), 3),
-                        "note": "Target was log1p-transformed due to high skewness. Predictions are in log-space.",
+                        "note": ("Target was log1p-transformed for training due to high "
+                                 "skewness. The model predicts in log-space; apply expm1 to "
+                                 "recover original units. Reported metrics (RMSE/MAE/R²) are "
+                                 "already inverse-transformed to the target's original units."),
                     }
                     logger.info(
                         f"Log-transformed skewed target '{target}' (skew={tgt.skew():.2f}). "
-                        "Metrics are computed in log-space; expm1 for original units."
+                        "Model trains in log-space; reported metrics are inverse-transformed "
+                        "to original units (expm1)."
                     )
             except Exception as e:
                 logger.warning(f"Log-target transform failed (non-critical): {e}")
@@ -602,18 +735,49 @@ class FeatureEngineeringService:
         # Scale features (after selection)
         df, scaling_map = self.scale_features(df, target)
 
-        # selected_features is computed from df BEFORE attaching the hidden split-time
-        # key, so the key is never treated as a model feature.
-        selected = [c for c in df.columns if c != target]
+        # Cast boolean feature columns to int so they survive the model-matrix build.
+        # Downstream (training/improvement/finalization) assembles X via
+        # `select_dtypes(include=[np.number])`, which EXCLUDES bool — so a bool feature
+        # would be silently dropped from the model while remaining in
+        # `selected_features`, desyncing the inference manifest from the actual model
+        # (and discarding genuine signal). Casting to int keeps them numeric everywhere.
+        bool_cols = [c for c in df.select_dtypes(include=["bool"]).columns if c != target]
+        if bool_cols:
+            df[bool_cols] = df[bool_cols].astype("int8")
+            logger.info(f"Cast {len(bool_cols)} boolean feature(s) to int: {bool_cols}")
+
+        # selected_features is the CANONICAL, ordered model-feature list: exactly the
+        # numeric non-target columns the model is trained on. Computed BEFORE attaching
+        # the hidden split keys (so they're never features) and restricted to numeric
+        # dtypes so it can never list a column the model matrix omits — every
+        # downstream stage selects these columns by name, keeping train/val/test/
+        # inference perfectly aligned and the inference manifest truthful.
+        selected = [
+            c for c in df.select_dtypes(include=[np.number]).columns if c != target
+        ]
+        dropped_nonnumeric = [c for c in df.columns if c != target and c not in selected]
+        if dropped_nonnumeric:
+            logger.info(
+                f"Excluded {len(dropped_nonnumeric)} non-numeric column(s) from the "
+                f"model feature set (not encoded to numbers): {dropped_nonnumeric}"
+            )
 
         # Attach the out-of-time split key (epoch seconds from the primary datetime)
         # as a hidden column the splitter uses to sort chronologically, then drops.
-        from core.constants import AXIOM_SPLIT_TIME_COL
+        from core.constants import AXIOM_SPLIT_GROUP_COL, AXIOM_SPLIT_TIME_COL
         if getattr(self, "_split_time", None) is not None:
             try:
                 df[AXIOM_SPLIT_TIME_COL] = self._split_time.reindex(df.index)
             except Exception as e:
                 logger.warning(f"Could not attach split-time key (non-critical): {e}")
+
+        # Attach the hidden entity/group key so the splitter can keep an entity
+        # within a single split (identity-leakage prevention); dropped before saving.
+        if getattr(self, "_split_group", None) is not None:
+            try:
+                df[AXIOM_SPLIT_GROUP_COL] = self._split_group.reindex(df.index).astype(str)
+            except Exception as e:
+                logger.warning(f"Could not attach split-group key (non-critical): {e}")
 
         # Save
         artifact_dir = ensure_directory(Path(settings.pipeline.artifact_dir) / state.run_id)

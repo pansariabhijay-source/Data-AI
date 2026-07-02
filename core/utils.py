@@ -105,6 +105,35 @@ def get_artifact_dir(base_dir: str, run_id: str) -> Path:
     return p
 
 
+def build_model_matrix(
+    df: pd.DataFrame,
+    target: Any = None,
+    feature_names: Any = None,
+) -> "tuple[np.ndarray, list[str]]":
+    """Build the numeric model matrix, selecting columns BY NAME when a canonical
+    ``feature_names`` list is known.
+
+    Returns ``(X, columns_used)``. When ``feature_names`` is provided (the ordered
+    feature list persisted by feature engineering), columns are selected in exactly
+    that order and any missing column is filled with 0. This guarantees the train,
+    validation, test and future inference matrices share the same columns in the
+    same order — a plain ``select_dtypes(number)`` per CSV instead relies on every
+    split producing the identical column set/order, which silently breaks if one
+    split reads a column as a different dtype or a column is absent.
+
+    Falls back to ``select_dtypes(number)`` (minus the target) when no feature list
+    is available (e.g. a partial workflow that skipped feature engineering).
+    """
+    known = [c for c in (feature_names or []) if c in df.columns]
+    if known:
+        X = df.reindex(columns=known)
+        X = X.apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        return X.to_numpy(), known
+    frame = df.drop(columns=[target], errors="ignore") if target is not None else df
+    frame = frame.select_dtypes(include=[np.number])
+    return frame.to_numpy(), frame.columns.tolist()
+
+
 def infer_column_types(df: pd.DataFrame) -> dict[str, list[str]]:
     """Classify columns into semantic types."""
     result: dict[str, list[str]] = {

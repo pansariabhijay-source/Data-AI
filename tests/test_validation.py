@@ -73,6 +73,48 @@ def test_detect_leakage_does_not_flag_moderate_predictor():
     assert "feat" not in detect_target_leakage(df, "target")
 
 
+def test_detect_leakage_categorical_string_feature():
+    """A pure-string feature that (almost) perfectly determines the target is
+    leakage, but the numeric-AUC path coerced it to NaN and skipped it. The
+    out-of-fold target-encoding path must now catch it."""
+    rng = np.random.RandomState(0)
+    n = 600
+    y = rng.randint(0, 2, n)
+    # Category encodes the answer: label 1 -> "fraud_*", label 0 -> "ok_*".
+    status = np.where(y == 1, "flagged_fraud", "cleared_ok")
+    df = pd.DataFrame({
+        "status": status,                       # string, perfectly predictive -> leak
+        "noise_cat": rng.choice(["a", "b", "c"], n),
+        "target": y,
+    })
+    leaked = detect_target_leakage(df, "target")
+    assert "status" in leaked
+    assert "noise_cat" not in leaked
+
+
+def test_detect_leakage_does_not_flag_highcard_string_id():
+    """A near-unique string ID column perfectly 'predicts' the target in-sample but
+    must NOT be flagged: out-of-fold encoding collapses unseen categories to the
+    global mean, so it scores ~0.5. (IDs are handled by the FE ID guard instead.)"""
+    rng = np.random.RandomState(2)
+    n = 600
+    y = rng.randint(0, 2, n)
+    ids = [f"user_{i}" for i in range(n)]  # unique per row
+    df = pd.DataFrame({"user_id": ids, "target": y})
+    assert "user_id" not in detect_target_leakage(df, "target")
+
+
+def test_detect_leakage_categorical_benign_not_flagged():
+    """A low-cardinality categorical only weakly related to the target is not leakage."""
+    rng = np.random.RandomState(3)
+    n = 500
+    cat = rng.choice(["red", "green", "blue"], n)
+    # Mild association only.
+    y = np.where(cat == "red", rng.binomial(1, 0.6, n), rng.binomial(1, 0.45, n))
+    df = pd.DataFrame({"color": cat, "target": y})
+    assert "color" not in detect_target_leakage(df, "target")
+
+
 def test_detect_imbalance():
     s = pd.Series([0] * 95 + [1] * 5)
     result = detect_class_imbalance(s)

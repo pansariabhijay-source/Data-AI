@@ -5,6 +5,53 @@ Newest changes at the top of each section.
 
 ---
 
+## 🛠️ Correctness & fraud-rigor pass (latest session — UNCOMMITTED, on branch `fix/bool-feature-drop`)
+
+Six fixes landed after a deep read of the pipeline. **88 → 118 unit tests, all green**
+(4 new test files). Each fix has dedicated tests; the whole suite plus two full
+8-agent end-to-end runs (fraud classification + skewed regression) pass. Not yet
+committed — review, then commit.
+
+1. **Regression metrics were reported in log-space (real bug).** A skewed target is
+   `log1p`-transformed for training, but nothing inverted it — reported RMSE/MAE/R²
+   were in log-dollars. Added `core.metrics.target_inverse_transform` +
+   `inverse_transform=` on `compute_metrics`; training/improvement/finalization now
+   report regression metrics in the target's ORIGINAL units (verified: a homes run
+   reports RMSE ≈ \$293k, not ≈0.5). Manifest records the transform for serving.
+2. **Tuning/selection leaked the future on out-of-time runs.** `improvement` and CV
+   champion-selection used `StratifiedKFold(shuffle=True)`; now use `TimeSeriesSplit`
+   when `split_strategy == "out-of-time"` (forward-chaining, no future leak).
+3. **String-categorical target leakage was missed.** `detect_target_leakage` coerced
+   every feature to numeric first, so a pure-string leaky column (`status`→label)
+   became NaN and was skipped. Added out-of-fold target-encoded AUC for categoricals
+   (self-guards against false positives on high-cardinality IDs).
+4. **Group-aware (entity) splitting.** The same card/user could land in both train and
+   test (identity leakage). Feature engineering now threads a hidden
+   `__axiom_split_group__` key (entity detected by name: cc_num/card/user_id/…); the
+   splitter keeps each entity within one split — **grouped out-of-time** when a time
+   axis is also present (whole entities, oldest→train), else `StratifiedGroupKFold` /
+   `GroupShuffleSplit`. Config `splitting.group_aware_split` (auto/off). No-op when no
+   entity column exists, so most datasets are unchanged.
+5. **Time-safe per-entity aggregates.** `card_amt_mean/std/max/zscore/count` were
+   computed over the WHOLE dataset (look-ahead). Now causal expanding windows over
+   each entity's PAST only (vectorised cumulative sums), when a time axis exists; falls
+   back to whole-card stats when there's no time axis.
+6. **Bootstrap CIs on test metrics.** `core.metrics.bootstrap_metric_cis` +
+   `state.test_metric_cis`; the report's Held-Out Test table now shows a **95% CI**
+   column. Env `BOOTSTRAP_CI_N` (default 500, 0 disables).
+   **Bonus — train/serve alignment hardening (#8):** `selected_features` is now the
+   canonical *numeric* feature list, and training/improvement/finalization build the
+   model matrix BY NAME via `core.utils.build_model_matrix` (not `select_dtypes`
+   order), so train/val/test/inference can never desync (verified: manifest feature
+   set == train numeric columns).
+
+New/changed knobs: `splitting.group_aware_split` (auto), `BOOTSTRAP_CI_N` (500).
+New tests: `tests/test_time_aware_cv.py`, `test_splitting_group.py`,
+`test_entity_aggregates.py`, `test_model_matrix.py` (+ additions to `test_metrics.py`,
+`test_validation.py`).
+
+---
+
 ## 📖 Session context / handoff (read this first)
 
 This is the full story of the work session, so anyone (or a fresh chat) can pick

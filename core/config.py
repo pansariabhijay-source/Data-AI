@@ -161,6 +161,12 @@ class SplittingConfig(BaseModel):
     # column. Out-of-time evaluation is the correct, leakage-free protocol for
     # temporal data like fraud (random splitting leaks the future).
     time_aware_split: str = "auto"
+    # Group-aware (entity) splitting: "auto" keeps an entity (card/user/account)
+    # entirely within one split when an entity column is detected, preventing
+    # identity leakage across train/test. Combines with out-of-time when a time
+    # axis is also present (entities are ordered by first-seen time). "off"
+    # disables; "on" is treated like "auto" (a no-op when no entity is detected).
+    group_aware_split: str = "auto"
 
     @field_validator("test_ratio")
     @classmethod

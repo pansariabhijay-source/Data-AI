@@ -31,6 +31,7 @@ from core.metrics import (
     positive_class_proba,
     predict_with_optimal_threshold,
     selection_score,
+    target_inverse_transform,
 )
 from core.model_registry import (
     ModelRegistry,
@@ -43,7 +44,7 @@ from core.model_registry import (
 )
 from core.resampling import maybe_resample
 from core.state import ErrorReport, ExperimentRecord, ModelResult, PipelineState
-from core.utils import ensure_directory, get_timestamp
+from core.utils import build_model_matrix, ensure_directory, get_timestamp
 
 logger = get_logger("training")
 
@@ -134,6 +135,22 @@ def _subsample_for_training(
     return X[idx], y[idx]
 
 
+def _time_ordered_subsample(
+    X: np.ndarray, y: np.ndarray, cap: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Cap rows while PRESERVING row (chronological) order — no shuffle.
+
+    Used for time-aware cross-validation on out-of-time runs: an even stride keeps
+    the full time span so ``TimeSeriesSplit`` sees representative forward-chaining
+    folds, without the class-balancing shuffle that would destroy the ordering.
+    """
+    n = len(X)
+    if cap <= 0 or n <= cap:
+        return X, y
+    idx = np.unique(np.linspace(0, n - 1, cap).astype(int))
+    return X[idx], y[idx]
+
+
 class ModelTrainingService:
     def __init__(self, config: TrainingConfig, registry: ModelRegistry, seed: int = 42) -> None:
         self._config = config
@@ -144,6 +161,7 @@ class ModelTrainingService:
         self, spec: ModelSpec, X_train: np.ndarray, y_train: np.ndarray,
         X_val: np.ndarray, y_val: np.ndarray, problem_type: ProblemType,
         artifact_dir: Path, has_validation: bool = False, resampled: bool = False,
+        target_inverse: Optional[Any] = None,
     ) -> ModelResult:
         """Train a single model and return its results."""
         start = time.perf_counter()
@@ -215,8 +233,10 @@ class ModelTrainingService:
                     preds = model.predict(X_val)
                     train_preds = model.predict(X_train)
 
-                metrics = compute_metrics(y_val, preds, problem_type, y_prob)
-                train_metrics = compute_metrics(y_train, train_preds, problem_type)
+                metrics = compute_metrics(y_val, preds, problem_type, y_prob,
+                                          inverse_transform=target_inverse)
+                train_metrics = compute_metrics(y_train, train_preds, problem_type,
+                                                inverse_transform=target_inverse)
 
             elapsed = time.perf_counter() - start
             mem_after = psutil.Process(os.getpid()).memory_info().rss / (1024**2)
@@ -257,6 +277,7 @@ class ModelTrainingService:
     def _cv_selection_scores(
         self, specs: list[ModelSpec], X: np.ndarray, y: np.ndarray,
         problem_type: ProblemType, n_classes: int, seed: int, resampled: bool,
+        time_ordered: bool = False, target_inverse: Optional[Any] = None,
     ) -> dict[str, tuple[float, float]]:
         """Cross-validate each base model and return ``{name: (mean, std)}``.
 
@@ -269,17 +290,24 @@ class ModelTrainingService:
         if folds < 2 or problem_type == ProblemType.CLUSTERING or len(X) < folds * 10:
             return {}
 
-        from sklearn.model_selection import KFold, StratifiedKFold
+        from sklearn.model_selection import KFold, StratifiedKFold, TimeSeriesSplit
 
-        Xc, yc = _subsample_for_training(X, y, problem_type, seed, cap=_CV_SELECTION_MAX_ROWS)
-
-        if problem_type == ProblemType.CLASSIFICATION:
-            _, counts = np.unique(yc, return_counts=True)
-            if counts.min() < folds:
-                return {}  # too few minority samples for stratified CV
-            splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
+        if time_ordered:
+            # The run used an out-of-time split, so evaluate candidates the same
+            # honest way here: preserve chronological order (even-stride cap keeps
+            # the full time span) and use forward-chaining TimeSeriesSplit — never
+            # a shuffled fold that would leak the future into selection.
+            Xc, yc = _time_ordered_subsample(X, y, cap=_CV_SELECTION_MAX_ROWS)
+            splitter = TimeSeriesSplit(n_splits=folds)
         else:
-            splitter = KFold(n_splits=folds, shuffle=True, random_state=seed)
+            Xc, yc = _subsample_for_training(X, y, problem_type, seed, cap=_CV_SELECTION_MAX_ROWS)
+            if problem_type == ProblemType.CLASSIFICATION:
+                _, counts = np.unique(yc, return_counts=True)
+                if counts.min() < folds:
+                    return {}  # too few minority samples for stratified CV
+                splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
+            else:
+                splitter = KFold(n_splits=folds, shuffle=True, random_state=seed)
 
         scores: dict[str, tuple[float, float]] = {}
         for spec in specs:
@@ -304,7 +332,8 @@ class ModelTrainingService:
                         except Exception:
                             y_prob = None
                     preds = model.predict(Xc[va_idx])
-                    m = compute_metrics(yc[va_idx], preds, problem_type, y_prob)
+                    m = compute_metrics(yc[va_idx], preds, problem_type, y_prob,
+                                        inverse_transform=target_inverse)
                     fold_scores.append(selection_score(m, problem_type, n_classes))
                 except Exception as e:
                     logger.debug(f"CV fold failed for {spec.name}: {e}")
@@ -476,7 +505,7 @@ class ModelTrainingService:
             test_df = pd.read_csv(state.test_path, low_memory=False)
             if not target or target not in test_df.columns:
                 return
-            X_test = test_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+            X_test, _ = build_model_matrix(test_df, target, state.selected_features)
             y_test = test_df[target].values
             model = joblib.load(state.best_model_path)
 
@@ -499,7 +528,10 @@ class ModelTrainingService:
             else:
                 preds = model.predict(X_test)
 
-            state.test_metrics = compute_metrics(y_test, preds, problem_type, y_prob)
+            state.test_metrics = compute_metrics(
+                y_test, preds, problem_type, y_prob,
+                inverse_transform=target_inverse_transform(state.data_quality_flags),
+            )
             cm = confusion_counts(y_test, preds)
             if cm:
                 state.test_confusion = cm
@@ -540,19 +572,22 @@ class ModelTrainingService:
 
         has_validation = False
         resampled = False
+        # Select the model matrix BY NAME from the canonical feature list so train,
+        # val and test share identical columns/order (see core.utils.build_model_matrix).
+        feats = state.selected_features
         if problem_type == ProblemType.CLUSTERING:
-            X_train = train_df.select_dtypes(include=[np.number]).values
+            X_train, _ = build_model_matrix(train_df, None, feats)
             y_train = np.zeros(len(X_train))  # placeholder
             X_val, y_val = X_train, y_train
         else:
             if not target or target not in train_df.columns:
                 raise TrainingError(f"Target '{target}' not in training data")
-            X_train = train_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+            X_train, _ = build_model_matrix(train_df, target, feats)
             y_train = train_df[target].values
 
             if state.val_path:
                 val_df = pd.read_csv(state.val_path, low_memory=False)
-                X_val = val_df.drop(columns=[target]).select_dtypes(include=[np.number]).values
+                X_val, _ = build_model_matrix(val_df, target, feats)
                 y_val = val_df[target].values
                 has_validation = len(X_val) > 0
             else:
@@ -580,6 +615,20 @@ class ModelTrainingService:
                     "minority_after": rr.minority_after,
                     "target_ratio": tcfg.smote_sampling_strategy,
                 }
+
+        # Regression targets may have been log-transformed for training; report all
+        # metrics (val/train/test/CV) in the target's ORIGINAL units via this inverse.
+        target_inverse = target_inverse_transform(state.data_quality_flags)
+
+        # Time-aware CV selection is valid only when the run used an out-of-time split
+        # AND the train rows are still in chronological order (SMOTE appends synthetic
+        # rows with no time position, so it breaks the ordering). Capture the ordered
+        # arrays BEFORE the shuffling subsample below.
+        time_ordered_cv = (
+            state.data_quality_flags.get("split_strategy") == "out-of-time"
+            and not resampled
+        )
+        X_train_ordered, y_train_ordered = X_train, y_train
 
         # Cap rows used to fit candidate models (stratified). The dominant cost on
         # large data; champion is still scored on the full val/test splits.
@@ -609,6 +658,7 @@ class ModelTrainingService:
                     executor.submit(
                         self._train_single_model, spec, X_train, y_train, X_val, y_val,
                         problem_type, artifact_dir, has_validation, resampled,
+                        target_inverse,
                     ): spec.name
                     for spec in specs
                 }
@@ -618,7 +668,7 @@ class ModelTrainingService:
             for spec in specs:
                 results.append(self._train_single_model(
                     spec, X_train, y_train, X_val, y_val, problem_type, artifact_dir,
-                    has_validation, resampled,
+                    has_validation, resampled, target_inverse,
                 ))
 
         primary_metric = get_primary_metric(problem_type)
@@ -633,7 +683,11 @@ class ModelTrainingService:
         # so the champion is stable run-to-run. Models without a CV score (e.g. the
         # ensemble, built below) fall back to their single-split selection score.
         cv_scores = self._cv_selection_scores(
-            specs, X_train, y_train, problem_type, n_classes, self._seed, resampled,
+            specs,
+            X_train_ordered if time_ordered_cv else X_train,
+            y_train_ordered if time_ordered_cv else y_train,
+            problem_type, n_classes, self._seed, resampled,
+            time_ordered=time_ordered_cv, target_inverse=target_inverse,
         )
 
         def score_of(r: ModelResult) -> float:
