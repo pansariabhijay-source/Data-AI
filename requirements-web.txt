@@ -1,0 +1,48 @@
+# Runtime dependencies for the Axiom WEB app (FastAPI backend + ML pipeline).
+#
+# This is a deliberately lean subset of requirements.txt: it OMITS crewai /
+# crewai-tools (the optional CLI/LLM orchestration path in main.py), which the
+# web pipeline never imports at runtime — dropping them removes ~1.5 GB of image
+# and several minutes of build. It ADDS the web-server and plotting packages that
+# requirements.txt relied on being pulled in transitively (fastapi, uvicorn,
+# python-multipart, matplotlib, seaborn).
+#
+# Versions are pinned to the known-good set the app was developed against.
+
+# ── Web server ───────────────────────────────────────────────────────────────
+fastapi==0.137.2
+uvicorn==0.49.0
+python-multipart==0.0.32
+
+# ── Config & validation ──────────────────────────────────────────────────────
+pydantic==2.12.5
+pydantic-settings==2.10.1
+python-dotenv==1.2.2
+PyYAML==6.0.3
+
+# ── Database & auth ──────────────────────────────────────────────────────────
+SQLAlchemy==2.0.51
+bcrypt==5.0.0
+passlib==1.7.4
+
+# ── Data & ML ────────────────────────────────────────────────────────────────
+numpy==2.4.6
+pandas==3.0.3
+scipy==1.17.1
+scikit-learn==1.9.0
+xgboost==3.2.0
+lightgbm==4.6.0
+imbalanced-learn==0.14.2
+shap==0.51.0
+optuna==4.9.0
+joblib==1.5.3
+
+# ── Visualization & reports ──────────────────────────────────────────────────
+matplotlib==3.11.0
+seaborn==0.13.2
+reportlab==5.0.0
+openpyxl==3.1.5
+nbformat==5.10.4
+
+# ── System ───────────────────────────────────────────────────────────────────
+psutil==7.2.2

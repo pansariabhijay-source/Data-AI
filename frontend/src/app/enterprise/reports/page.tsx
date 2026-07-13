@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { FileText, Download, Loader2, Inbox, ArrowUpRight, Trophy, Database, Clock, Crosshair } from "lucide-react";
-import { listExperiments, downloadReportPdf } from "@/lib/api";
+import { FileText, FileCode, Package, Download, Loader2, Inbox, ArrowUpRight, Trophy, Database, Clock, Crosshair } from "lucide-react";
+import { listExperiments, downloadReportPdf, downloadReportNotebook, downloadModel } from "@/lib/api";
 
 type RunSummary = Awaited<ReturnType<typeof listExperiments>>["runs"][number];
 
@@ -22,6 +22,8 @@ export default function ReportsPage() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [nbBusy, setNbBusy] = useState<string | null>(null);
+  const [modelBusy, setModelBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,6 +38,16 @@ export default function ReportsPage() {
   const handleDownload = async (runId: string) => {
     setDownloading(runId);
     try { await downloadReportPdf(runId); } catch (e) { console.error(e); } finally { setDownloading(null); }
+  };
+
+  const handleNotebook = async (runId: string) => {
+    setNbBusy(runId);
+    try { await downloadReportNotebook(runId); } catch (e) { console.error(e); } finally { setNbBusy(null); }
+  };
+
+  const handleModel = async (runId: string) => {
+    setModelBusy(runId);
+    try { await downloadModel(runId); } catch (e) { console.error(e); } finally { setModelBusy(null); }
   };
 
   return (
@@ -122,13 +134,29 @@ export default function ReportsPage() {
                 {/* actions */}
                 <div className="mt-4 flex items-center gap-2 relative z-10">
                   <Link href={href} className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.07] text-[12px] font-medium text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-all">
-                    View report <ArrowUpRight size={13} />
+                    View <ArrowUpRight size={13} />
                   </Link>
+                  <button
+                    onClick={() => handleModel(r.run_id)}
+                    disabled={modelBusy === r.run_id}
+                    title="Download trained model (.zip)"
+                    className="inline-flex items-center justify-center px-2.5 py-2 rounded-lg bg-white/[0.04] border border-white/[0.07] text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-all disabled:opacity-50"
+                  >
+                    {modelBusy === r.run_id ? <Loader2 size={14} className="animate-spin" /> : <Package size={14} />}
+                  </button>
+                  <button
+                    onClick={() => handleNotebook(r.run_id)}
+                    disabled={nbBusy === r.run_id}
+                    title="Download notebook (.ipynb)"
+                    className="inline-flex items-center justify-center px-2.5 py-2 rounded-lg bg-white/[0.04] border border-white/[0.07] text-text-secondary hover:text-text-primary hover:bg-white/[0.08] transition-all disabled:opacity-50"
+                  >
+                    {nbBusy === r.run_id ? <Loader2 size={14} className="animate-spin" /> : <FileCode size={14} />}
+                  </button>
                   <button
                     onClick={() => handleDownload(r.run_id)}
                     disabled={downloading === r.run_id}
-                    title="Download PDF"
-                    className="inline-flex items-center justify-center px-3 py-2 rounded-lg bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-all disabled:opacity-50"
+                    title="Download PDF report"
+                    className="inline-flex items-center justify-center px-2.5 py-2 rounded-lg bg-primary/12 border border-primary/25 text-primary hover:bg-primary/20 transition-all disabled:opacity-50"
                   >
                     {downloading === r.run_id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   </button>

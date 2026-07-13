@@ -340,6 +340,28 @@ export async function downloadReportNotebook(
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Download the trained champion model as a zip bundle: the .joblib model file,
+ * the inference manifest (feature order + decision threshold), and a
+ * predict_example.py starting point for scoring new data offline.
+ */
+export async function downloadModel(runId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/report/${runId}/model`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail || "Model download failed");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `axiom-model-${runId.slice(0, 8)}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function getShapData(runId: string): Promise<Record<string, number>> {
   const res = await authFetch(`${API_BASE}/shap/${runId}`);
   const data = await handleResponse(res, "SHAP data not found");

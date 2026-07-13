@@ -1,0 +1,43 @@
+# Axiom — one-command run for the team:  docker compose up --build
+# Then open http://localhost:3000  (backend API on http://localhost:8000)
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: axiom-backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"   # published so the browser can upload directly
+    environment:
+      # Browser origin(s) allowed to call the API (CORS). Defaults cover the
+      # standard frontend port; override ALLOWED_ORIGINS if you change FRONTEND_PORT.
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
+    volumes:
+      - axiom-data:/app/data          # SQLite DB + uploaded datasets persist
+      - axiom-artifacts:/app/artifacts # trained models, SHAP, splits
+      - axiom-reports:/app/reports     # generated reports
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: axiom-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      # Server-side /api/* proxy target inside the compose network.
+      BACKEND_URL: "http://backend:8000"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  axiom-data:
+  axiom-artifacts:
+  axiom-reports:

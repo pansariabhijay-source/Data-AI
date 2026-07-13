@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query, Depends
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -981,6 +981,159 @@ async def get_report_notebook(
     )
 
 
+def _model_predict_example(model_filename: str, manifest: dict) -> str:
+    """A copy/paste-ready template for scoring new data with the champion model."""
+    threshold = manifest.get("decision_threshold", 0.5)
+    problem = (manifest.get("problem_type") or "classification").lower()
+    target = manifest.get("target", "target")
+
+    if problem == "classification":
+        score = (
+            f"THRESHOLD = {threshold}\n"
+            "proba = model.predict_proba(X)[:, 1]   # probability of the positive class\n"
+            f"prediction = (proba >= THRESHOLD).astype(int)   # 1 = {target}\n"
+        )
+    else:
+        score = "prediction = model.predict(X)\n"
+
+    return (
+        '"""\n'
+        "Score new data with the Axiom champion model.\n"
+        "\n"
+        "IMPORTANT: this model expects rows that are ALREADY preprocessed and\n"
+        "feature-engineered exactly as Axiom did during training -- the columns in\n"
+        "`expected_features` (see inference_manifest.json), in that exact order.\n"
+        "To go from a RAW CSV end-to-end, use the reproduction notebook instead\n"
+        "(in the app: open the run and download the Notebook / Reproduce export).\n"
+        '"""\n'
+        "import json\n"
+        "import joblib\n"
+        "import pandas as pd\n"
+        "\n"
+        'manifest = json.load(open("inference_manifest.json"))\n'
+        f'model = joblib.load("{model_filename}")\n'
+        'features = manifest["expected_features"]\n'
+        "\n"
+        "# Replace this with your already-preprocessed rows:\n"
+        "# X = pd.read_csv('your_prepared_rows.csv')\n"
+        "X = pd.DataFrame(columns=features)\n"
+        "X = X[features]   # same columns, same order the model was trained on\n"
+        "\n"
+        + score +
+        "\n"
+        "print(prediction)\n"
+    )
+
+
+def _model_bundle_readme(run_id: str, champion: str, manifest: dict) -> str:
+    """Plain-text explainer packaged alongside the model file."""
+    lines = [
+        "Axiom - Trained Model Bundle",
+        "=" * 32,
+        f"Run ID          : {run_id}",
+        f"Champion model  : {champion}",
+        f"Problem type    : {manifest.get('problem_type', '?')}",
+        f"Target column   : {manifest.get('target', '?')}",
+        f"Decision thresh : {manifest.get('decision_threshold', 'n/a')}",
+        f"Feature count   : {manifest.get('n_expected_features', '?')}",
+        "",
+        "Files in this bundle:",
+        "  - the .joblib model file    (load with joblib.load)",
+        "  - inference_manifest.json   (feature order, threshold, usage notes)",
+        "  - predict_example.py        (copy/paste starting point for scoring)",
+        "",
+        "How to use:",
+        f"  {manifest.get('how_to_use', 'Load the .joblib and call predict / predict_proba.')}",
+        "",
+        "Requirements: Python 3.11+, joblib, scikit-learn, pandas, and the model's",
+        "library (e.g. lightgbm / xgboost) at the versions in requirements-web.txt.",
+    ]
+    return "\n".join(lines)
+
+
+@app.get("/api/report/{run_id}/model")
+async def download_model(
+    run_id: str,
+    user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """Bundle the trained champion model for download.
+
+    Returns a .zip with the champion model file (joblib), the inference manifest
+    (feature order + tuned decision threshold), and a ready-to-edit
+    predict_example.py -- everything needed to score new data offline.
+    """
+    _authorize_run_id(run_id, user, db)
+
+    artifacts_dir = (Path("artifacts") / run_id).resolve()
+    manifest_path = artifacts_dir / "inference_manifest.json"
+    if not manifest_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No trained model is available for this run.",
+        )
+
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Model manifest is unreadable")
+
+    # Resolve the champion model file, keeping it strictly inside this run's
+    # artifacts directory (guards against a tampered or stale manifest path).
+    champion = manifest.get("champion_model") or "model"
+    models_dir = artifacts_dir / "models"
+    candidates = []
+    if manifest.get("model_file"):
+        candidates.append(Path(manifest["model_file"]))
+    candidates += [
+        models_dir / f"{champion}_calibrated.joblib",
+        models_dir / f"{champion}.joblib",
+    ]
+    model_path = None
+    for cand in candidates:
+        resolved = cand.resolve()
+        if artifacts_dir in resolved.parents and resolved.exists():
+            model_path = resolved
+            break
+    if model_path is None:
+        raise HTTPException(
+            status_code=404,
+            detail="The trained model file for this run is missing on disk.",
+        )
+
+    model_name = model_path.name
+
+    def _build_zip() -> bytes:
+        import io
+        import zipfile
+
+        example = _model_predict_example(model_name, manifest)
+        readme = _model_bundle_readme(run_id, champion, manifest)
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(model_path, arcname=model_name)
+            zf.writestr("inference_manifest.json", json.dumps(manifest, indent=2))
+            zf.writestr("predict_example.py", example)
+            zf.writestr("README.txt", readme)
+        buf.seek(0)
+        return buf.read()
+
+    try:
+        # Zipping (model files can be large) is I/O heavy — keep it off the loop.
+        zip_bytes = await run_in_threadpool(_build_zip)
+    except Exception as e:
+        logger.exception("Model bundle failed")
+        raise HTTPException(status_code=500, detail=f"Model bundle failed: {e}")
+
+    filename = f"axiom-model-{run_id[:8]}.zip"
+    return StreamingResponse(
+        iter([zip_bytes]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/shap/{run_id}")
 async def get_shap_data(run_id: str, user: User = Depends(get_current_user), db=Depends(get_db)):
     """Get SHAP feature importance data for a completed run."""
@@ -1108,6 +1261,21 @@ async def get_visualizations(
     return {"visualizations": vizs}
 
 
+def _load_feature_importances(run_id: str) -> dict:
+    """Feature-importance map for a run: model importances first, SHAP as fallback."""
+    art = Path("artifacts") / run_id
+    for name in ("feature_importances.json", "shap_importance.json"):
+        p = art / name
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(data, dict) and data:
+                    return data
+            except Exception:
+                continue
+    return {}
+
+
 @app.post("/api/visualizations/{run_id}/generate")
 async def generate_visualization_endpoint(
     run_id: str,
@@ -1116,26 +1284,39 @@ async def generate_visualization_endpoint(
 ):
     """Generate a specific visualization on demand."""
     run = _require_run(run_id, user)
-    data_path = run.get("data_path")
-    if not data_path or not Path(data_path).exists():
-        raise HTTPException(status_code=400, detail="Data file not found")
 
     valid_types = {
         "pairplot", "pca", "correlation", "missing_values",
-        "distributions", "boxplots", "target_distribution",
+        "distributions", "boxplots", "target_distribution", "dtype_distribution",
+        "model_comparison", "feature_importance",
     }
     if request.type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Unknown viz type: {request.type}")
 
     target = run.get("target_column")
+    data_path = run.get("data_path")
+
+    # Model-centric charts are built from the run's results / saved artifacts and
+    # never touch the source CSV; every other chart needs the dataset on disk.
+    model_types = {"model_comparison", "feature_importance"}
+    if request.type not in model_types and (not data_path or not Path(data_path).exists()):
+        raise HTTPException(status_code=400, detail="Data file not found")
 
     def _render() -> Optional[dict]:
-        import pandas as pd
         from visualization.engine import (
             generate_pairplot, generate_pca_plot,
             generate_correlation_heatmap, generate_missing_values_heatmap,
             generate_distributions, generate_boxplots, generate_target_distribution,
+            generate_dtype_chart, generate_feature_importance, generate_model_comparison,
         )
+        # Model-centric charts: source from the run result / artifacts.
+        if request.type == "model_comparison":
+            models = (run.get("result") or {}).get("models") or []
+            return generate_model_comparison(models)
+        if request.type == "feature_importance":
+            return generate_feature_importance(_load_feature_importances(run_id))
+
+        # Dataset-centric charts: render from a sampled copy of the source data.
         df = _detect_and_read_csv(Path(data_path))
         if len(df) > _VIZ_SAMPLE_ROWS:
             df = df.sample(n=_VIZ_SAMPLE_ROWS, random_state=0)
@@ -1147,6 +1328,7 @@ async def generate_visualization_endpoint(
             "distributions": lambda: generate_distributions(df),
             "boxplots": lambda: generate_boxplots(df),
             "target_distribution": lambda: generate_target_distribution(df, target) if target else None,
+            "dtype_distribution": lambda: generate_dtype_chart(df),
         }
         return viz_map[request.type]()
 

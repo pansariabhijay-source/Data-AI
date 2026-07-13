@@ -10,6 +10,34 @@ Built with a robust **FastAPI backend** and a modern **Next.js frontend**, Axiom
 
 ---
 
+## 🚀 Quick Start (Docker) — the easy way
+
+You only need **Docker Desktop** installed (https://www.docker.com/products/docker-desktop/). No Python, Node, or dependency setup.
+
+```bash
+docker compose up --build      # first run builds the images (a few minutes)
+```
+
+Then open **http://localhost:3000** in your browser. The backend API runs on http://localhost:8000.
+
+- To stop: press `Ctrl+C`, or run `docker compose down`.
+- Later runs are instant: `docker compose up` (no `--build` needed).
+- Your trained models, reports and login data persist across restarts (Docker volumes).
+
+**If port 3000 is already in use** on your machine, pick another one:
+
+```bash
+FRONTEND_PORT=3100 \
+ALLOWED_ORIGINS="http://localhost:3100,http://127.0.0.1:3100" \
+docker compose up --build
+# then open http://localhost:3100
+```
+
+> No dataset is bundled (to keep the download small). Upload your own CSV in the UI —
+> any classification/regression table works; it's tuned for fraud detection.
+
+---
+
 ## 🌟 Key Features
 
 - **Multi-Agent Architecture**: Powered by a cooperative swarm of specialized AI agents (Data Collector, Preprocessor, Feature Engineer, Trainer, Auditor, Tuner, Finalizer).

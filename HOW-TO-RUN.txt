@@ -1,0 +1,129 @@
+========================================================================
+  AXIOM — HOW TO RUN IT  (no coding needed, ~10 minutes the first time)
+========================================================================
+
+You do NOT need to install Python, Node, or any libraries.
+You only need ONE free program called "Docker Desktop".
+
+Think of it like this:
+  • Docker Desktop = an engine that runs quietly in the background.
+  • This folder     = has a recipe that tells the engine how to run the app.
+  • You connect them by typing ONE line in the Terminal. That's it.
+
+
+------------------------------------------------------------------------
+STEP 1 — Install Docker Desktop (one time only)
+------------------------------------------------------------------------
+  1. Go to:  https://www.docker.com/products/docker-desktop/
+  2. Download the version for your computer:
+        - Mac with Apple chip (M1/M2/M3/M4/M5) -> "Download for Mac - Apple Silicon"
+        - Mac with Intel chip                  -> "Download for Mac - Intel Chip"
+        - Windows                              -> "Download for Windows"
+  3. Install it (open the download and follow the prompts).
+  4. OPEN the Docker Desktop app.
+        - Wait until the whale icon at the top (Mac) or bottom-right (Windows)
+          stops animating and is steady.
+        - The app window should say "Engine running" (green) at the bottom-left.
+        - IMPORTANT: Docker must be OPEN and RUNNING, not just installed.
+
+
+------------------------------------------------------------------------
+STEP 2 — Unzip this project
+------------------------------------------------------------------------
+  • Double-click the .zip you received. It becomes a normal folder.
+  • Remember where it is (e.g. your Desktop).
+
+
+------------------------------------------------------------------------
+STEP 3 — Open the Terminal and go into this folder
+------------------------------------------------------------------------
+  ON A MAC:
+    1. Open the "Terminal" app (press Cmd+Space, type "Terminal", Enter).
+    2. Type this exactly, WITH a space after cd, then STOP:
+           cd
+    3. Drag this project folder onto the Terminal window and let go.
+       (It auto-fills the folder's location.)
+    4. Press Enter.
+
+  ON WINDOWS:
+    1. Open the project folder in File Explorer.
+    2. Click the address bar at the top, type  cmd  and press Enter.
+       (A black command window opens, already inside this folder.)
+
+
+------------------------------------------------------------------------
+STEP 4 — Start the app (this is the ONLY command)
+------------------------------------------------------------------------
+  Type this and press Enter:
+
+           docker compose up --build
+
+  • The FIRST time, it downloads and builds everything (a few minutes).
+    You'll see lots of text scrolling — that's normal, just let it finish.
+  • It's ready when the scrolling stops and you see lines mentioning
+    "backend" and "frontend" running.
+
+
+------------------------------------------------------------------------
+STEP 5 — Open the app in your browser
+------------------------------------------------------------------------
+  Go to:   http://localhost:3000
+
+  Create an account, upload a CSV spreadsheet, pick the column to predict,
+  and click run. Done!
+
+
+------------------------------------------------------------------------
+HOW TO STOP IT
+------------------------------------------------------------------------
+  • Go back to the Terminal window and press:  Ctrl + C
+  • (Optional, fully clean up:)  docker compose down
+
+
+------------------------------------------------------------------------
+RUNNING IT AGAIN LATER
+------------------------------------------------------------------------
+  Same folder, but you can skip the build now:
+
+           docker compose up
+
+  Open http://localhost:3000 again. Your past runs and login are still there.
+
+
+========================================================================
+  TROUBLESHOOTING
+========================================================================
+
+"docker: command not found" or "Cannot connect to the Docker daemon"
+    -> Docker Desktop isn't running. Open the Docker app, wait for the
+       whale/engine to be steady/green, then try Step 4 again.
+
+"port is already allocated" or "address already in use" (port 3000)
+    -> Something else on your computer is using port 3000. Use another port:
+
+         Mac/Linux:
+           FRONTEND_PORT=3100 ALLOWED_ORIGINS="http://localhost:3100,http://127.0.0.1:3100" docker compose up --build
+
+         Windows (Command Prompt):
+           set FRONTEND_PORT=3100
+           set ALLOWED_ORIGINS=http://localhost:3100,http://127.0.0.1:3100
+           docker compose up --build
+
+       Then open  http://localhost:3100  instead.
+
+The build is taking a long time
+    -> The first build downloads a lot and can take several minutes on a
+       normal connection. This only happens once. Let it finish.
+
+I don't have a dataset to test with
+    -> Any CSV spreadsheet with rows and columns works. Pick the column you
+       want to predict when the app asks. (It's especially good at fraud data.)
+
+
+========================================================================
+  WHAT THIS APP IS
+========================================================================
+  Axiom is an automatic data scientist: upload a spreadsheet, tell it which
+  column to predict, and it cleans the data, builds features, trains several
+  models, picks the best one, checks it for mistakes, and writes a full report
+  — automatically, with no coding. See README.md for the technical details.

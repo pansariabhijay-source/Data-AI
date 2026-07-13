@@ -6,12 +6,12 @@ import {
   Trophy, Layers, Brain, BarChart3, Zap, Clock, AlertTriangle,
   FileText, Sparkles, Download, CheckCircle2, TrendingUp,
   Database, Eraser, Wrench, ShieldCheck, ArrowRight,
-  Columns3, Activity, Loader2, X, ZoomIn,
+  Columns3, Activity, Loader2, X, ZoomIn, Package,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import Navbar from "@/components/layout/Navbar";
 import ReportMarkdown from "@/components/ReportMarkdown";
-import { getResults, getReport, getVisualizations, downloadReportPdf, downloadReportNotebook, ResultsResponse, VizResult } from "@/lib/api";
+import { getResults, getReport, getVisualizations, downloadReportPdf, downloadReportNotebook, downloadModel, ResultsResponse, VizResult } from "@/lib/api";
 import { fadeUp, stagger } from "@/lib/animations";
 
 // ── Reusable UI Components ──────────────────────────────────────────────────
@@ -119,6 +119,14 @@ export default function FreeResultsPage({ params }: { params: Promise<{ runId: s
     finally { setNbBusy(false); }
   }, [runId]);
 
+  const [modelBusy, setModelBusy] = useState(false);
+  const handleDownloadModel = useCallback(async () => {
+    setModelBusy(true); setPdfError(null);
+    try { await downloadModel(runId); }
+    catch (e: unknown) { setPdfError(e instanceof Error ? e.message : "Model download failed"); }
+    finally { setModelBusy(false); }
+  }, [runId]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -165,6 +173,10 @@ export default function FreeResultsPage({ params }: { params: Promise<{ runId: s
                 <motion.p variants={fadeUp} className="text-[14px] text-text-muted mt-2">Your autonomous data scientist finished the job. Here&apos;s everything it found.</motion.p>
               </div>
               <motion.div variants={fadeUp} className="flex items-center gap-3">
+                <button onClick={handleDownloadModel} disabled={modelBusy} title="Download the trained model + usage example (.zip)" className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold bg-white/[0.04] border border-glass-border text-text-secondary hover:bg-white/[0.08] transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  {modelBusy ? <div className="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-secondary rounded-full animate-spin" /> : <Package size={13} strokeWidth={2} />}
+                  {modelBusy ? "Packaging…" : "Model"}
+                </button>
                 <button onClick={handleDownloadNotebook} disabled={nbBusy} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-semibold bg-white/[0.04] border border-glass-border text-text-secondary hover:bg-white/[0.08] transition-all disabled:opacity-40 disabled:cursor-not-allowed">
                   {nbBusy ? <div className="w-3.5 h-3.5 border-2 border-text-muted/30 border-t-text-secondary rounded-full animate-spin" /> : <FileText size={13} strokeWidth={2} />}
                   {nbBusy ? "Building…" : "Notebook"}

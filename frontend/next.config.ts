@@ -23,10 +23,14 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
+    // Proxy /api/* to the FastAPI backend. Defaults to the local dev server;
+    // in Docker/compose BACKEND_URL points at the backend service (e.g.
+    // http://backend:8000) so the same build works in both places.
+    const backend = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
     return [
       {
         source: "/api/:path*",
-        destination: "http://127.0.0.1:8000/api/:path*",
+        destination: `${backend}/api/:path*`,
       },
     ];
   },
