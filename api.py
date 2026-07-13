@@ -90,10 +90,46 @@ def _run_artifact_cleanup() -> None:
         logger.warning("Artifact cleanup failed", exc_info=True)
 
 
+def _reconcile_orphaned_runs() -> None:
+    """On boot, flip interrupted runs from in-progress to failed.
+
+    Pipelines execute as daemon child processes that die with the API parent, so
+    a freshly started process means nothing is genuinely running. Any run still
+    marked in-progress in the DB is therefore an orphan from a previous process
+    (a crash or restart mid-run). Left alone, the dashboard reports these dead
+    runs as "active pipelines" forever. Reconcile them to a terminal state so the
+    counts reflect reality; truly-live runs are always started after this point.
+    """
+    try:
+        db = SessionLocal()
+        try:
+            stale = (
+                db.query(PromptHistory)
+                .filter(~PromptHistory.status.in_(["completed", "failed"]))
+                .all()
+            )
+            for row in stale:
+                row.status = "failed"
+                if not row.result_summary:
+                    row.result_summary = json.dumps(
+                        {"error": "Interrupted — the server restarted before this run finished."}
+                    )
+            if stale:
+                db.commit()
+                logger.info("Reconciled %d orphaned run(s) to 'failed' on startup", len(stale))
+        finally:
+            db.close()
+    except Exception:
+        logger.warning("Orphaned-run reconciliation failed", exc_info=True)
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     # Startup
     _warm_up_viz()
+    # Nothing can be running in a fresh process — clear stale "running" runs so
+    # the dashboard doesn't count dead pipelines as active.
+    _reconcile_orphaned_runs()
     # Reclaim disk from old runs at boot so a long-idle install self-heals.
     threading.Thread(target=_run_artifact_cleanup, daemon=True).start()
     yield
@@ -1204,7 +1240,11 @@ async def list_runs(user: User = Depends(get_current_user), db=Depends(get_db)):
         best_model, best_metric_value = _parse_metric_value(h.result_summary)
         runs[h.run_id] = {
             "run_id": h.run_id,
-            "status": "completed" if h.status == "completed" else ("failed" if h.status == "failed" else "running"),
+            # Durable history records terminal state only. A row that never reached
+            # a terminal status is an interrupted/orphaned run — report it as failed,
+            # not "running". Genuinely live runs are overlaid from _active_runs below
+            # (step 2), which takes precedence and restores their real status.
+            "status": "completed" if h.status == "completed" else "failed",
             "started_at": h.created_at.isoformat() if h.created_at else None,
             "completed_at": None,
             "duration_seconds": None,
